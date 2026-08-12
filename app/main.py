@@ -1,5 +1,8 @@
 from fastapi import Depends, FastAPI, HTTPException
 from pydantic import BaseModel
+from google import genai
+from dotenv import load_dotenv
+load_dotenv()
 
 app = FastAPI()
 
@@ -9,9 +12,10 @@ app = FastAPI()
 
 class ChatRequest(BaseModel):
     message: str
-    model: str = "gemini-2.0-flash"
+    model: str = "gemini-3-flash-preview"
     max_tokens: int = 500
-
+def get_genai_client():
+    return genai.Client()
 
 def enforce_token_limit(request: ChatRequest) -> ChatRequest:
     if request.max_tokens > 2000:
@@ -29,9 +33,16 @@ def home():
 
 
 @app.post("/chat")
-def chat(request: ChatRequest = Depends(enforce_token_limit)):
+async def chat(
+    request: ChatRequest = Depends(enforce_token_limit),
+    client = Depends(get_genai_client)
+):
+    response = await client.aio.models.generate_content(
+        model=request.model,
+        contents=request.message,
+    )
     return {
         "received_message": request.message,
-        "model_requested": request.model,
-        "max_tokens_requested": request.max_tokens,
+        "model_used": request.model,
+        "ai_response": response.text,
     } 
