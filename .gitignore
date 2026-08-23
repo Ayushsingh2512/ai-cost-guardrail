@@ -4,9 +4,26 @@ __pycache__/
 build/
 dist/
 wheels/
-*.egg-info
+*.egg-info/
 
 # Virtual environments
-.venv
-# Environment variables
+.venv/
+
+# Environment variables and secrets
 .env
+.env.*
+!.env.example
+
+# Test and coverage output
+.pytest_cache/
+.coverage
+htmlcov/
+coverage.xml
+
+# Type-checker and linter caches
+.mypy_cache/
+.ruff_cache/
+
+# IDE / editor files
+.vscode/
+.idea/
