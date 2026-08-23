@@ -1,11 +1,12 @@
 [project]
 name = "ai-cost-guardrail"
 version = "0.1.0"
-description = "Add your description here"
+description = "AI Cost Guardrail - a production-oriented AI gateway for cost control and reliability"
 authors = [
     { name = "Ayush Singh", email = "ayushs6875@gmail.com" }
 ]
 requires-python = ">=3.14"
+
 dependencies = [
     "alembic==1.19.1",
     "annotated-doc==0.0.5",
@@ -78,10 +79,3 @@ dependencies = [
     "watchfiles==1.2.0",
     "websockets==16.1.1",
 ]
-
-[project.scripts]
-ai-cost-guardrail = "ai_cost_guardrail:main"
-
-[build-system]
-requires = ["uv_build>=0.12.3,<0.13.0"]
-build-backend = "uv_build"
