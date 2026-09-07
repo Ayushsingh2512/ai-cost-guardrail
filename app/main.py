@@ -28,3 +28,7 @@ def generate_test_token(
         ),
         "token_type": "bearer",
     }
+from app.api.v1 import chat, health
+
+app.include_router(chat.router)
+app.include_router(health.router)

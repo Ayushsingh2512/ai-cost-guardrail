@@ -1,11 +1,9 @@
 from fastapi import APIRouter, Depends, HTTPException
-
+from app.services.guardrail import guardrail_service
 from app.api.dependencies import (
-    COST_PER_1000_TOKENS,
-    enforce_budget,
+    enforce_guardrails,
     get_current_user,
     get_genai_client,
-    user_spend,
 )
 from app.schemas.chat import ChatRequest
 
@@ -15,7 +13,7 @@ router = APIRouter(prefix="/api/v1", tags=["Chat"])
 
 @router.post("/chat")
 async def chat(
-    request: ChatRequest = Depends(enforce_budget),
+    request: ChatRequest = Depends(enforce_guardrails),
     current_user: dict = Depends(get_current_user),
     client=Depends(get_genai_client),
 ):
@@ -37,9 +35,9 @@ async def chat(
             unused_tokens = request.max_tokens - actual_tokens
             refund_amount = (
                 unused_tokens / 1000
-            ) * COST_PER_1000_TOKENS
+            ) * guardrail_service.COST_PER_1000_TOKENS
 
-            user_spend[user_id] -= refund_amount
+            guardrail_service.user_spend[user_id] -= refund_amount
 
         return {
             "tenant_id": tenant_id,
@@ -47,16 +45,16 @@ async def chat(
             "received_message": request.message,
             "actual_tokens_used": actual_tokens,
             "ai_response": response.text,
-            "total_spend": round(user_spend[user_id], 6),
+            "total_spend": round(guardrail_service.user_spend[user_id], 6),
         }
 
     except Exception as e:
         # Failure refund
         full_refund = (
             request.max_tokens / 1000
-        ) * COST_PER_1000_TOKENS
+        ) * guardrail_service.COST_PER_1000_TOKENS
 
-        user_spend[user_id] -= full_refund
+        guardrail_service.user_spend[user_id] -= full_refund
 
         raise HTTPException(
             status_code=502,
