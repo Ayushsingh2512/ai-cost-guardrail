@@ -7,7 +7,8 @@ class Settings(BaseSettings):
     gemini_api_key: str
     redis_url: str = "redis://localhost:6379"
     jwt_secret: str
-    database_url: str = "postgresql://postgres:postgres@localhost:5432/ai_guardrail"
+    database_url: str = "postgresql+psycopg://postgres:postgres@localhost:5432/ai_guardrail"
+
 
     
     model_config = SettingsConfigDict(
