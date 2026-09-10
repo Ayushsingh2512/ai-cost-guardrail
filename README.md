@@ -22,27 +22,41 @@ This is the target design, not what's built yet — see the checklist below for 
 
 ## Where it's at right now
 
-Still early. Repo is set up, working on the actual gateway + auth right now.
+Core gateway is working and tested end to end. Still building out the production-hardening pieces.
 
 - [x] Project setup, folder structure, dependencies
-- [ ] `/chat` endpoint with real JWT auth
-- [ ] Rate limiter (Redis)
-- [ ] Security checks on incoming requests
-- [ ] Cost engine (reserve/commit/rollback)
+- [x] `/chat` endpoint with real JWT auth (tested: valid/invalid/tampered/expired tokens, missing-token rejection)
+- [x] Guardrail engine — token limits, model policy, budget reservation — built as a standalone, unit-tested service
+- [x] Redis integration (tested under connection failure and recovery)
+- [x] PostgreSQL integration (tested under connection failure and recovery)
+- [x] Tenant/User models + Alembic migrations, real tables verified
+- [x] Budget tracking backed by real Postgres data — survives a server restart, no longer in-memory
+- [x] pytest coverage for core guardrail logic
+- [ ] Docker compose so the whole app (not just Postgres/Redis) is a one-command run
+- [ ] Distributed rate limiter (Redis)
+- [ ] Security checks on incoming requests (PII, prompt injection)
 - [ ] Circuit breaker
 - [ ] Caching layer
 - [ ] File ingestion pipeline
-- [ ] Docker compose so it's a one-command run
 
 I'll update this as things get built instead of pretending it's all done.
 
 ## Stack
 
-FastAPI, Redis, Celery, PGVector, uv for deps.
+**In use:** FastAPI, PostgreSQL + SQLAlchemy + Alembic, Redis, JWT, Google Gemini, uv, pytest
+
+**Planned:** PGVector (semantic caching), Celery (async file processing)
 
 ## Running it
 
-Not runnable end-to-end yet. Will add setup steps once there's an actual endpoint to hit.
+\`\`\`bash
+docker-compose up -d          # starts Postgres + Redis
+uv sync                       # install dependencies
+uv run alembic upgrade head   # apply migrations
+uv run uvicorn app.main:app --reload
+\`\`\`
+
+Visit `http://127.0.0.1:8000/docs` for the interactive API. You'll need a JWT to hit `/chat` — generate one via `POST /token` (dev-only, not how real auth would work).
 
 ## Why
 
