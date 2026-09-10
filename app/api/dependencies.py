@@ -1,9 +1,12 @@
 from fastapi import Depends, HTTPException
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
+from sqlalchemy.orm import Session
+from app.services.models import Tenant
 from google import genai
 
 from app.core.security import verify_access_token
 from app.services.guardrail import guardrail_service
+from app.services.database import get_db
 from app.schemas.chat import ChatRequest
 
 
@@ -50,12 +53,14 @@ def get_current_user(
 def enforce_guardrails(
     request: ChatRequest,
     current_user: dict = Depends(get_current_user),
+    db: Session = Depends(get_db),
     
 ) -> ChatRequest:
     try:
         guardrail_service.check_token_limit(request.max_tokens)
         guardrail_service.check_model_policy(request.model)
-        guardrail_service.check_and_reserve_budget(current_user["user_id"], request.max_tokens)
+        guardrail_service.check_and_reserve_budget(db, int(current_user["tenant_id"]), request.max_tokens)
+
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
     return request

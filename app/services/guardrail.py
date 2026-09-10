@@ -1,3 +1,7 @@
+from sqlalchemy.orm import Session
+from app.services.models import Tenant
+
+
 class GuardrailService:
     ALLOWED_MODELS = ["gemini-3-flash-preview", "gemini-2.5-flash"]
     DAILY_BUDGET = 1.0
@@ -17,15 +21,20 @@ class GuardrailService:
     def estimate_cost(self, max_tokens: int) -> float:
         return (max_tokens / 1000) * self.COST_PER_1000_TOKENS
 
-    def check_and_reserve_budget(self, user_id: str, max_tokens: int) -> float:
+    def check_and_reserve_budget(self, db: Session, tenant_id: int, max_tokens: int) -> float:
+        tenant = db.query(Tenant).filter(Tenant.id == tenant_id).first()
+        if tenant is None:
+            raise ValueError(f"Tenant {tenant_id} not found")
         cost = self.estimate_cost(max_tokens)
-        current_spend = self.user_spend.get(user_id, 0.0)
-        if current_spend + cost > self.DAILY_BUDGET:
+        if tenant.current_spend + cost > tenant.monthly_budget:
             raise ValueError(
-                f"Request would exceed daily budget. Spent so far: ${current_spend:.4f}, Limit: ${self.DAILY_BUDGET:.4f}"
+                f"Request would exceed budget. Spent so far: ${tenant.current_spend:.4f},"
+                f"Limit: ${tenant.monthly_budget:.4f}"
             )
-        self.user_spend[user_id] = current_spend + cost
+        tenant.current_spend += cost
+        db.commit()
         return cost
+       
 
 
 guardrail_service = GuardrailService()  

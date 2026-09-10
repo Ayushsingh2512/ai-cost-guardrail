@@ -1,7 +1,8 @@
 from fastapi import FastAPI
 from dotenv import load_dotenv
 
-from app.api.v1 import chat, health
+from app.api.v1 import chat, health , tenants
+
 from app.core.security import create_access_token
 
 load_dotenv()
@@ -10,6 +11,7 @@ app = FastAPI(title="AI Cost Guardrail")
 
 app.include_router(chat.router)
 app.include_router(health.router)
+app.include_router(tenants.router)
 
 
 @app.get("/")
