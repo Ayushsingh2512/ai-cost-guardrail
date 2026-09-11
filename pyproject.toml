@@ -5,7 +5,7 @@ description = "AI Cost Guardrail - a production-oriented AI gateway for cost con
 authors = [
     { name = "Ayush Singh", email = "ayushs6875@gmail.com" }
 ]
-requires-python = ">=3.14"
+requires-python = ">=3.11"
 
 dependencies = [
     "alembic==1.19.1",
@@ -78,4 +78,11 @@ dependencies = [
     "uvicorn==0.52.1",
     "watchfiles==1.2.0",
     "websockets==16.1.1",
+]
+
+[dependency-groups]
+dev = [
+    "mypy>=2.3.1",
+    "pyright>=1.1.413",
+    "ruff>=0.16.2",
 ]
