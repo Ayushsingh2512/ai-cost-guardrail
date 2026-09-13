@@ -7,7 +7,7 @@ Basically: I kept reading about companies burning through OpenAI credits with no
 ## What it does (or will do)
 
 - Auth + tenant/user identification via JWT
-- Per-tenant and per-user rate limiting using Redis
+- Per-tenant rate limiting using Redis — distinct `429` response so clients know to back off, not that their request was invalid
 - Checks incoming requests for PII, prompt injection attempts, and leaked secrets before they go anywhere
 - Reserves budget for a request *before* calling the LLM, so two concurrent requests from the same tenant can't both slip through and blow the budget
 - Circuit breaker around the LLM call — if the provider starts failing, stop hammering it and fail fast instead
@@ -32,8 +32,8 @@ Core gateway is working and tested end to end. Still building out the production
 - [x] Tenant/User models + Alembic migrations, real tables verified
 - [x] Budget tracking backed by real Postgres data — survives a server restart, no longer in-memory
 - [x] pytest coverage for core guardrail logic
-- [ ] Docker compose so the whole app (not just Postgres/Redis) is a one-command run
-- [ ] Distributed rate limiter (Redis)
+- [x] Docker compose so the whole app (not just Postgres/Redis) is a one-command run
+- [x] Distributed rate limiter (Redis) — tested under real 429 conditions
 - [ ] Security checks on incoming requests (PII, prompt injection)
 - [ ] Circuit breaker
 - [ ] Caching layer
@@ -49,14 +49,19 @@ I'll update this as things get built instead of pretending it's all done.
 
 ## Running it
 
-\`\`\`bash
-docker-compose up -d          # starts Postgres + Redis
-uv sync                       # install dependencies
-uv run alembic upgrade head   # apply migrations
-uv run uvicorn app.main:app --reload
-\`\`\`
+```bash
+docker-compose up --build     # starts everything — API + Postgres + Redis, migrations run automatically
+```
 
-Visit `http://127.0.0.1:8000/docs` for the interactive API. You'll need a JWT to hit `/chat` — generate one via `POST /token` (dev-only, not how real auth would work).
+Visit `http://127.0.0.1:8000/docs` for the interactive API once it's up. You'll need a JWT to hit `/chat` — generate one via `POST /token` (dev-only, not how real auth would work).
+
+For local development without rebuilding the container on every code change:
+```bash
+docker-compose up -d postgres redis   # just the dependencies
+uv sync
+uv run alembic upgrade head
+uv run uvicorn app.main:app --reload
+```
 
 ## Why
 
