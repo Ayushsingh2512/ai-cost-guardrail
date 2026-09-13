@@ -2,6 +2,10 @@ from sqlalchemy.orm import Session
 from app.services.models import Tenant
 
 
+class RateLimitExceeded(Exception):
+    pass
+
+
 class GuardrailService:
     ALLOWED_MODELS = ["gemini-3-flash-preview", "gemini-2.5-flash"]
     DAILY_BUDGET = 1.0
@@ -34,6 +38,13 @@ class GuardrailService:
         tenant.current_spend += cost
         db.commit()
         return cost
+    def check_rate_limit(self, redis_client, tenant_id: int, limit: int = 30, window_seconds: int = 60) -> None:
+        key = f"ratelimit:{tenant_id}"
+        current_count = redis_client.incr(key)
+        if current_count == 1:
+            redis_client.expire(key, window_seconds)
+        if current_count > limit:
+            raise RateLimitExceeded(f"Rate limit exceeded: {limit} requests per { window_seconds}s")
        
 
 
