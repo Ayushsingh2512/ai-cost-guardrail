@@ -38,7 +38,7 @@ class GuardrailService:
         tenant.current_spend += cost
         db.commit()
         return cost
-    def check_rate_limit(self, redis_client, tenant_id: int, limit: int = 30, window_seconds: int = 60) -> None:
+    def check_rate_limit(self, redis_client, tenant_id: int, limit: int = 3, window_seconds: int = 60) -> None:
         key = f"ratelimit:{tenant_id}"
         current_count = redis_client.incr(key)
         if current_count == 1:
