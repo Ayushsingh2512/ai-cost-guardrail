@@ -1,3 +1,4 @@
+import redis
 from sqlalchemy.orm import Session
 from app.services.models import Tenant
 
@@ -38,14 +39,31 @@ class GuardrailService:
         tenant.current_spend += cost
         db.commit()
         return cost
-    def check_rate_limit(self, redis_client, tenant_id: int, limit: int = 30, window_seconds: int = 60) -> None:
+
+    def check_rate_limit(
+        self,
+        redis_client,
+        tenant_id: int,
+        limit: int = 30,
+        window_seconds: int = 60,
+    ) -> None:
         key = f"ratelimit:{tenant_id}"
-        current_count = redis_client.incr(key)
-        if current_count == 1:
-            redis_client.expire(key, window_seconds)
+
+        try:
+            current_count = redis_client.incr(key)
+
+            if current_count == 1:
+                redis_client.expire(key, window_seconds)
+
+        except redis.exceptions.RedisError as e:
+            raise RuntimeError(
+                "Rate limiting service is unavailable"
+            ) from e
+
         if current_count > limit:
-            raise RateLimitExceeded(f"Rate limit exceeded: {limit} requests per { window_seconds}s")
-       
+            raise RateLimitExceeded(
+                f"Rate limit exceeded: {limit} requests per {window_seconds}s"
+            )
 
 
 guardrail_service = GuardrailService()  

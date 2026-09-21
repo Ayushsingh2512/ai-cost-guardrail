@@ -67,6 +67,8 @@ def enforce_guardrails(
         
     except RateLimitExceeded as e:
         raise HTTPException(status_code=429, detail=str(e))
+    except RuntimeError as e:
+        raise HTTPException(status_code=503, detail=str(e))
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
     return request
