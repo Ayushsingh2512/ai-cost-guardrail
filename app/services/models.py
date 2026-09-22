@@ -1,7 +1,8 @@
 from datetime import datetime
-from sqlalchemy import ForeignKey, String, Float, DateTime, func
+from decimal import Decimal
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from app.services.database import Base
+from sqlalchemy import ForeignKey, String, Float, DateTime, Numeric, func
 
 
 class Tenant(Base):
@@ -22,3 +23,65 @@ class User(Base):
     email: Mapped[str] = mapped_column(String)
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now()) 
     tenant: Mapped["Tenant"] = relationship(back_populates = "users")
+    
+class UsageRecord(Base):
+    __tablename__ = "usage_records"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+
+    request_id: Mapped[str] = mapped_column(
+        String,
+        unique=True,
+        nullable=False,
+        index=True,
+    )
+
+    tenant_id: Mapped[int] = mapped_column(
+        ForeignKey("tenants.id"),
+        nullable=False,
+        index=True,
+    )
+
+    user_id: Mapped[int] = mapped_column(
+        ForeignKey("users.id"),
+        nullable=False,
+        index=True,
+    )
+
+    model: Mapped[str] = mapped_column(
+        String,
+        nullable=False,
+    )
+
+    input_tokens: Mapped[int] = mapped_column(
+        nullable=False,
+    )
+
+    output_tokens: Mapped[int] = mapped_column(
+        nullable=False,
+    )
+
+    total_tokens: Mapped[int] = mapped_column(
+        nullable=False,
+    )
+
+    reserved_cost: Mapped[Decimal] = mapped_column(
+        Numeric(12, 6),
+        nullable=False,
+    )
+
+    actual_cost: Mapped[Decimal] = mapped_column(
+        Numeric(12, 6),
+        nullable=False,
+    )
+
+    status: Mapped[str] = mapped_column(
+        String(20),
+        nullable=False,
+    )
+
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime,
+        server_default=func.now(),
+        nullable=False,
+    )

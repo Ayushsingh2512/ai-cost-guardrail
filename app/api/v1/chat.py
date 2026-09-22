@@ -1,5 +1,8 @@
+from decimal import Decimal
+
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
+from uuid import uuid4
 
 from app.api.dependencies import (
     enforce_guardrails,
@@ -11,6 +14,7 @@ from app.services.circuit_breaker import circuit_breaker
 from app.services.database import get_db
 from app.services.guardrail import guardrail_service
 from app.services.models import Tenant
+from app.services.usage import usage_service
 
 
 router = APIRouter(prefix="/api/v1", tags=["Chat"])
@@ -23,11 +27,18 @@ async def chat(
     client=Depends(get_genai_client),
     db: Session = Depends(get_db),
 ):
-    user_id = current_user["user_id"]
     tenant_id = int(current_user["tenant_id"])
+    user_id = int(current_user["user_id"])
 
-    # Find the tenant
-    tenant = db.query(Tenant).filter(Tenant.id == tenant_id).first()
+    # ─────────────────────────────────────
+    # Find tenant
+    # ─────────────────────────────────────
+
+    tenant = (
+        db.query(Tenant)
+        .filter(Tenant.id == tenant_id)
+        .first()
+    )
 
     if tenant is None:
         raise HTTPException(
@@ -36,10 +47,63 @@ async def chat(
         )
 
     # ─────────────────────────────────────
-    # Circuit breaker check
+    # Generate request ID
+    # ─────────────────────────────────────
+
+    request_id = str(uuid4())
+
+    # ─────────────────────────────────────
+    # Calculate reservation
+    # ─────────────────────────────────────
+
+    reserved_cost = Decimal(
+        str(guardrail_service.estimate_cost(request.max_tokens))
+    )
+
+    # ─────────────────────────────────────
+    # Reserve budget
+    # ─────────────────────────────────────
+
+    try:
+        usage = usage_service.reserve_budget(
+            db=db,
+            tenant_id=tenant_id,
+            request_id=request_id,
+            model=request.model,
+            user_id=user_id,
+            reserved_cost=reserved_cost,
+        )
+
+        db.commit()
+
+    except ValueError as e:
+        db.rollback()
+
+        raise HTTPException(
+            status_code=400,
+            detail=str(e),
+        )
+
+    except Exception:
+        db.rollback()
+
+        raise HTTPException(
+            status_code=500,
+            detail="Unable to reserve request budget",
+        )
+
+    # ─────────────────────────────────────
+    # Circuit breaker
     # ─────────────────────────────────────
 
     if not circuit_breaker.allow_request():
+        usage_service.settle_failure(
+            db=db,
+            usage=usage,
+        )
+
+        db.commit()
+
         raise HTTPException(
             status_code=503,
             detail=(
@@ -62,16 +126,22 @@ async def chat(
         )
 
     except Exception as e:
-        # Gemini/upstream call failed
         circuit_breaker.record_failure()
 
-        # Refund the entire reservation
-        full_refund = (
-            request.max_tokens / 1000
-        ) * guardrail_service.COST_PER_1000_TOKENS
+        try:
+            usage_service.settle_failure(
+                db=db,
+                usage=usage,
+            )
+            db.commit()
 
-        tenant.current_spend -= full_refund
-        db.commit()
+        except Exception:
+            db.rollback()
+
+            raise HTTPException(
+                status_code=500,
+                detail="LLM failed and usage settlement also failed",
+            )
 
         raise HTTPException(
             status_code=502,
@@ -79,31 +149,72 @@ async def chat(
         )
 
     # Gemini successfully responded.
-    # This should NOT be inside the try/except above.
     circuit_breaker.record_success()
 
     # ─────────────────────────────────────
-    # Process successful response
+    # Extract actual usage
     # ─────────────────────────────────────
 
-    actual_tokens = response.usage_metadata.total_token_count
+    usage_metadata = response.usage_metadata
 
-    # Refund unused reservation
-    if actual_tokens < request.max_tokens:
-        unused_tokens = request.max_tokens - actual_tokens
+    input_tokens = usage_metadata.prompt_token_count or 0
+    output_tokens = usage_metadata.candidates_token_count or 0
+    total_tokens = usage_metadata.total_token_count or (
+        input_tokens + output_tokens
+    )
 
-        refund_amount = (
-            unused_tokens / 1000
-        ) * guardrail_service.COST_PER_1000_TOKENS
+    # ─────────────────────────────────────
+    # Calculate actual cost
+    # ─────────────────────────────────────
 
-        tenant.current_spend -= refund_amount
+    actual_cost = Decimal(
+        str(
+            (total_tokens / 1000)
+            * guardrail_service.COST_PER_1000_TOKENS
+        )
+    )
+
+    # ─────────────────────────────────────
+    # Settle reservation
+    # ─────────────────────────────────────
+
+    try:
+        usage_service.settle_success(
+            db=db,
+            usage=usage,
+            actual_cost=actual_cost,
+            input_tokens=input_tokens,
+            output_tokens=output_tokens,
+            total_tokens=total_tokens,
+        )
+
         db.commit()
+        db.refresh(usage)
+        db.refresh(tenant)
+
+    except Exception:
+        db.rollback()
+
+        raise HTTPException(
+            status_code=500,
+            detail="LLM succeeded but usage settlement failed",
+        )
+
+    # ─────────────────────────────────────
+    # Return response
+    # ─────────────────────────────────────
 
     return {
+        "request_id": request_id,
         "tenant_id": tenant_id,
         "user_id": user_id,
         "received_message": request.message,
-        "actual_tokens_used": actual_tokens,
+        "input_tokens": input_tokens,
+        "output_tokens": output_tokens,
+        "total_tokens": total_tokens,
+        "reserved_cost": float(usage.reserved_cost),
+        "actual_cost": float(usage.actual_cost),
+        "status": usage.status,
         "ai_response": response.text,
         "total_spend": round(tenant.current_spend, 6),
     }

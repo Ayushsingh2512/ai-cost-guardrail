@@ -1,20 +1,14 @@
 from fastapi import Depends, HTTPException
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
-from sqlalchemy.orm import Session
-from app.services.models import Tenant
 from google import genai
+
 from app.core.security import verify_access_token
-from app.services.guardrail import guardrail_service, RateLimitExceeded
-from app.services.database import get_db
 from app.schemas.chat import ChatRequest
+from app.services.guardrail import guardrail_service, RateLimitExceeded
 from app.services.redis_client import get_redis_client
 
 
-
 security = HTTPBearer()
-
-
-
 
 
 def get_genai_client():
@@ -51,24 +45,39 @@ def get_current_user(
             status_code=401,
             detail="Invalid or expired token",
         )
-    
+
+
 def enforce_guardrails(
     request: ChatRequest,
     current_user: dict = Depends(get_current_user),
-    db: Session = Depends(get_db),
-    redis_client = Depends(get_redis_client),
-    
+    redis_client=Depends(get_redis_client),
 ) -> ChatRequest:
     try:
         guardrail_service.check_token_limit(request.max_tokens)
+
         guardrail_service.check_model_policy(request.model)
-        guardrail_service.check_rate_limit(redis_client, int(current_user["tenant_id"]))
-        guardrail_service.check_and_reserve_budget(db, int(current_user["tenant_id"]), request.max_tokens)
-        
+
+        guardrail_service.check_rate_limit(
+            redis_client,
+            int(current_user["tenant_id"]),
+        )
+
     except RateLimitExceeded as e:
-        raise HTTPException(status_code=429, detail=str(e))
+        raise HTTPException(
+            status_code=429,
+            detail=str(e),
+        )
+
     except RuntimeError as e:
-        raise HTTPException(status_code=503, detail=str(e))
+        raise HTTPException(
+            status_code=503,
+            detail=str(e),
+        )
+
     except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e))
+        raise HTTPException(
+            status_code=400,
+            detail=str(e),
+        )
+
     return request

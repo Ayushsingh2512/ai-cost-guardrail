@@ -5,22 +5,27 @@ from app.api.dependencies import (
     get_genai_client,
     enforce_guardrails,
 )
+from app.services.database import get_db
 from app.schemas.chat import ChatRequest
 from app.services.circuit_breaker import (
     circuit_breaker,
     CircuitState,
 )
+from app.services.models import Tenant, User
 
 
 # ---------------------------------------------------------
 # Fake Gemini client
 # ---------------------------------------------------------
 
+
 class FakeResponse:
     def __init__(self):
         self.text = "Fake Gemini response"
 
         class UsageMetadata:
+            prompt_token_count = 50
+            candidates_token_count = 50
             total_token_count = 100
 
         self.usage_metadata = UsageMetadata()
@@ -58,8 +63,9 @@ def override_genai_client():
 
 
 # ---------------------------------------------------------
-# Override guardrails for this test
+# Override guardrails for this integration test
 # ---------------------------------------------------------
+
 
 def override_guardrails(request: ChatRequest):
     return request
@@ -69,9 +75,34 @@ def override_guardrails(request: ChatRequest):
 # Integration test
 # ---------------------------------------------------------
 
-def test_circuit_breaker_full_lifecycle():
 
+def test_circuit_breaker_full_lifecycle(db):
+
+    # -----------------------------------------------------
+    # Create an isolated test tenant
+    # -----------------------------------------------------
+
+    tenant = Tenant(
+        name="Circuit Breaker Test Tenant",
+        monthly_budget=100.0,
+        current_spend=0.0,
+    )
+
+    db.add(tenant)
+    db.flush()
+
+    user = User(
+        tenant_id=tenant.id,
+        email="circuit-breaker-test@example.com",
+    )
+
+    db.add(user)
+    db.flush()
+
+    # -----------------------------------------------------
     # Start from a clean circuit-breaker state
+    # -----------------------------------------------------
+
     circuit_breaker.state = CircuitState.CLOSED
     circuit_breaker.failure_count = 0
     circuit_breaker.opened_at = None
@@ -80,23 +111,30 @@ def test_circuit_breaker_full_lifecycle():
     fake_client.aio.models.calls = 0
     fake_client.aio.models.should_fail = True
 
+    # -----------------------------------------------------
     # Override dependencies
+    # -----------------------------------------------------
+
+    def override_test_db():
+        yield db
+
     app.dependency_overrides[get_genai_client] = override_genai_client
     app.dependency_overrides[enforce_guardrails] = override_guardrails
+    app.dependency_overrides[get_db] = override_test_db
 
     try:
 
         with TestClient(app) as client:
 
             # -------------------------------------------------
-            # Get JWT
+            # Get JWT for our isolated test user
             # -------------------------------------------------
 
             token_response = client.post(
                 "/token",
                 params={
-                    "tenant_id": 1,
-                    "user_id": 1,
+                    "tenant_id": tenant.id,
+                    "user_id": user.id,
                 },
             )
 
@@ -128,7 +166,7 @@ def test_circuit_breaker_full_lifecycle():
 
                 assert response.status_code == 502
 
-            # Five failures should open the circuit
+            # Five consecutive failures should open the circuit
             assert circuit_breaker.state == CircuitState.OPEN
 
             # Gemini should have been called exactly five times
@@ -146,8 +184,7 @@ def test_circuit_breaker_full_lifecycle():
 
             assert response.status_code == 503
 
-            # IMPORTANT:
-            # Gemini should NOT have been called again.
+            # Gemini should NOT have been called again
             assert fake_client.aio.models.calls == 5
 
             # -------------------------------------------------
@@ -155,10 +192,6 @@ def test_circuit_breaker_full_lifecycle():
             # -------------------------------------------------
 
             circuit_breaker.opened_at -= 31
-
-            # allow_request() should transition:
-            #
-            # OPEN → HALF_OPEN
 
             assert circuit_breaker.allow_request() is True
             assert circuit_breaker.state == CircuitState.HALF_OPEN
@@ -185,5 +218,8 @@ def test_circuit_breaker_full_lifecycle():
 
     finally:
 
+        # -----------------------------------------------------
         # Always clean up dependency overrides
+        # -----------------------------------------------------
+
         app.dependency_overrides.clear()
