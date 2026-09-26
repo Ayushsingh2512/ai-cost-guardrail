@@ -4,6 +4,24 @@ A backend/system-design learning project for building an LLM Cost & Guardrail Ga
 
 The goal is not to pretend this is a complete enterprise AI platform. The goal is to build and understand the engineering problems that appear around real LLM workloads.
 
+## What it does (or will do)
+
+- Auth + tenant/user identification via JWT
+- Per-tenant rate limiting using Redis — distinct `429` response so clients know to back off, not that their request was invalid
+- Model policy + output token limits checked before a request goes anywhere
+- Reserves budget for a request *before* calling the LLM — estimated from real input tokens (the provider's `count_tokens` API) plus the maximum requested output — so two concurrent requests from the same tenant can't both slip through and blow the budget
+- Settles against actual usage after the call: refund the unused part of the reservation, add the shortfall if usage went over the estimate, release everything if the request failed
+- Circuit breaker around the LLM call — if the provider starts failing, stop hammering it and fail fast instead
+- Every request leaves an auditable `usage_records` row — request_id, tokens, reserved vs actual cost, status
+- (planned) Checks on incoming requests for PII, prompt injection attempts, and leaked secrets
+- (planned) Caching repeated queries so identical requests don't hit the LLM twice
+- (planned) A separate path for file uploads — extract text, chunk it, embed it, store it for retrieval later
+
+## Architecture
+
+![Architecture diagram](./docs/architecture_diagram.png)
+This is the target design, not what's built yet.
+
 ## How the request flows
 
 ```
@@ -74,6 +92,7 @@ For every request:
     - request failure → release the reservation
 
 Money is stored using PostgreSQL `NUMERIC(12,6)` and handled with Python `Decimal` rather than floating-point arithmetic.
+
 
 ## Concurrency
 
