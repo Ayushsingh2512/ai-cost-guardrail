@@ -1,68 +1,272 @@
 # ai-cost-guardrail
 
-Building a gateway that sits in front of LLM API calls and handles the stuff you actually need in production but never see in tutorials — rate limits, cost tracking, PII scrubbing, a circuit breaker for when the provider goes down.
+A backend/system-design learning project for building an LLM Cost & Guardrail Gateway — a service that sits between applications and LLM providers and handles the infrastructure around LLM calls: authentication, tenant isolation, rate limiting, budget enforcement, cost accounting, usage auditing, and failure handling.
 
-Basically: I kept reading about companies burning through OpenAI credits with no per-user limits, or a single flaky API call taking down an entire feature, and wanted to actually build something that solves that instead of just reading about it.
+The goal is not to pretend this is a complete enterprise AI platform. The goal is to build and understand the engineering problems that appear around real LLM workloads.
 
-## What it does (or will do)
+## How the request flows
 
-- Auth + tenant/user identification via JWT
-- Per-tenant rate limiting using Redis — distinct `429` response so clients know to back off, not that their request was invalid
-- Checks incoming requests for PII, prompt injection attempts, and leaked secrets before they go anywhere
-- Reserves budget for a request *before* calling the LLM, so two concurrent requests from the same tenant can't both slip through and blow the budget
-- Circuit breaker around the LLM call — if the provider starts failing, stop hammering it and fail fast instead
-- Caches repeated queries so identical requests don't hit the LLM twice
-- A separate path for file uploads — extract text, chunk it, embed it, store it for retrieval later
+```
+Client
+  │
+  ▼
+JWT Authentication
+  │
+  ▼
+Tenant / User Identification
+  │
+  ▼
+Guardrails
+ ├── Model Policy
+ ├── Output Token Limit
+ └── Redis Rate Limit
+  │
+  ▼
+Provider Token Counting
+  │
+  ▼
+Cost Reservation
+  │
+  ▼
+PostgreSQL Budget Check + Row Lock
+  │
+  ▼
+Circuit Breaker
+  │
+  ▼
+LLM Provider
+  │
+  ├───────────────┐
+  ▼               ▼
+Success         Failure
+  │               │
+  ▼               ▼
+Actual Usage    Release Reservation
+  │
+  ▼
+Cost Settlement
+  │
+  ▼
+Usage Record
+  │
+  ▼
+Response
+```
 
-## Architecture
+## How the money works
 
-![Architecture diagram](./docs/architecture_diagram.png)
+Budget reservation is deliberately separated from actual spending.
 
-This is the target design, not what's built yet — see the checklist below for actual progress.
+For every request:
 
-## Where it's at right now
+1. Count the estimated input tokens using the provider's token-counting API.
+2. Combine estimated input tokens with the client's maximum requested output tokens.
+3. Calculate the maximum expected cost using the model's pricing configuration.
+4. Lock the tenant row with `SELECT ... FOR UPDATE`.
+5. Verify that the tenant has enough remaining budget.
+6. Reserve the estimated amount and create a `usage_records` row with `status="reserved"`.
+7. Call the LLM.
+8. Read the provider's actual usage metadata.
+9. Calculate the actual cost.
+10. Settle the reservation:
+    - actual cost lower than reservation → refund the difference
+    - actual cost higher than reservation → increase spend to the actual cost
+    - request failure → release the reservation
 
-Core gateway is working and tested end to end. Still building out the production-hardening pieces.
+Money is stored using PostgreSQL `NUMERIC(12,6)` and handled with Python `Decimal` rather than floating-point arithmetic.
 
-- [x] Project setup, folder structure, dependencies
-- [x] `/chat` endpoint with real JWT auth (tested: valid/invalid/tampered/expired tokens, missing-token rejection)
-- [x] Guardrail engine — token limits, model policy, budget reservation — built as a standalone, unit-tested service
-- [x] Redis integration (tested under connection failure and recovery)
-- [x] PostgreSQL integration (tested under connection failure and recovery)
-- [x] Tenant/User models + Alembic migrations, real tables verified
-- [x] Budget tracking backed by real Postgres data — survives a server restart, no longer in-memory
-- [x] pytest coverage for core guardrail logic
-- [x] Docker compose so the whole app (not just Postgres/Redis) is a one-command run
-- [x] Distributed rate limiter (Redis) — tested under real 429 conditions
-- [ ] Security checks on incoming requests (PII, prompt injection)
-- [ ] Circuit breaker
+## Concurrency
+
+Budget enforcement is backed by PostgreSQL rather than an in-memory counter.
+
+The tenant row is locked during reservation:
+
+```
+Request A ─────┐
+               │
+               ▼
+          Lock tenant
+               │
+          Check budget
+               │
+           Reserve
+               │
+            Commit
+               │
+          Release lock
+               │
+Request B ──────────────────► Lock tenant
+                              │
+                         Check updated budget
+                              │
+                            ...
+```
+
+This prevents concurrent requests from independently seeing the same remaining budget and both spending it.
+
+## Circuit breaker
+
+The gateway uses a circuit breaker around the upstream LLM call.
+
+```
+CLOSED
+  │
+  │ repeated failures
+  ▼
+OPEN
+  │
+  │ recovery timeout
+  ▼
+HALF_OPEN
+  │
+  ├── success ──► CLOSED
+  │
+  └── failure ─► OPEN
+```
+
+The current circuit breaker is per-process in-memory state. A distributed circuit breaker shared across multiple API instances is future work.
+
+## API failure mapping
+
+The gateway translates known failure conditions into controlled HTTP responses:
+
+| Condition | Response |
+|---|---|
+| Missing / invalid authentication, invalid token claims | 401 |
+| Invalid guardrail request, unsupported model | 400 |
+| Rate limit exceeded | 429 |
+| Redis/rate-limiter unavailable, circuit breaker open | 503 |
+| Upstream LLM failure | 502 |
+
+## Current status
+
+Core gateway functionality is implemented and tested.
+
+Current test suite: 35 tests passing.
+
+### Implemented
+
+- [x] Project setup and dependency management
+- [x] FastAPI application structure
+- [x] `/api/v1/chat` endpoint
+- [x] JWT authentication with tenant/user identification
+- [x] Authentication failure handling
+- [x] Model policy and output-token limits
+- [x] Redis-backed per-tenant rate limiting (incl. Redis-unavailable handling)
+- [x] PostgreSQL tenant/user models + Alembic migrations
+- [x] PostgreSQL-backed budget tracking with row-locked reservation
+- [x] Provider-native input token counting
+- [x] Model-aware CostEngine
+- [x] Reservation/settlement lifecycle with actual usage-based costs
+- [x] Failed-request reservation release
+- [x] NUMERIC(12,6) money storage with Python Decimal calculations
+- [x] Circuit breaker: closed/open/half-open, unit + integration tested
+- [x] HTTP authentication and guardrail tests
+- [x] Docker Compose development stack
+
+### Next
+
+- [ ] Reservation edge-case tests (actual usage above reservation, breaker failures restoring spend)
+- [ ] Explicit failure handling for provider `count_tokens()` calls
+- [ ] Upstream LLM timeout handling
+- [ ] Atomic Redis rate limiting using Lua
+- [ ] Stale reservation cleanup after process failure
+- [ ] Security checks for PII, prompt injection, and leaked secrets
+- [ ] Observability: structured logs, metrics, and request tracing
+- [ ] Harden `/token` and `/tenants` development endpoints
+- [ ] RAG/document ingestion workload
 - [ ] Caching layer
-- [ ] File ingestion pipeline
+- [ ] Distributed circuit breaker
 
-I'll update this as things get built instead of pretending it's all done.
+## RAG workload
+
+RAG is part of the broader planned scope of the gateway, but it is not yet implemented.
+
+The planned flow:
+
+```
+Documents → Text Extraction → Chunking → Embeddings → Vector Storage
+        → Retrieval → Relevant Context → LLM Gateway → Response
+```
+
+The gateway is intended to provide the infrastructure around the RAG workload — authentication, tenant isolation, rate limiting, token/cost accounting, budget enforcement, and provider reliability.
+
+RAG implementation is intentionally scheduled after the core gateway is stable.
+
+## Scope
+
+This is a backend and system-design learning project, not an attempt to build a complete enterprise AI platform. The primary focus is everything around the LLM call — authentication, tenant isolation, rate limiting, guardrails, cost reservation, reliability, usage accounting, and settlement.
+
+PostgreSQL provides durable state and accounting. Redis provides fast, ephemeral state.
+
+RAG, caching, additional providers behind a common interface, distributed rate limiting and breaker state, stale reservation recovery, PII/secret handling, prompt-injection detection, background processing, and advanced observability are extensions built only when they support the project's learning objectives. Features that are not necessary for demonstrating the gateway's core engineering concepts will remain future work rather than being added simply to make the project appear larger.
 
 ## Stack
 
-**In use:** FastAPI, PostgreSQL + SQLAlchemy + Alembic, Redis, JWT, Google Gemini, uv, pytest
+**In use:** Python, FastAPI, PostgreSQL, SQLAlchemy, Alembic, Redis, JWT, Google Gemini, uv, pytest, Docker / Docker Compose
 
-**Planned:** PGVector (semantic caching), Celery (async file processing)
+**Planned:** PGVector, additional LLM provider, RAG retrieval pipeline, semantic caching, background processing
 
-## Running it
+## Running locally
+
+### Docker Compose
 
 ```bash
-docker-compose up --build     # starts everything — API + Postgres + Redis, migrations run automatically
+docker compose up --build
 ```
 
-Visit `http://127.0.0.1:8000/docs` for the interactive API once it's up. You'll need a JWT to hit `/chat` — generate one via `POST /token` (dev-only, not how real auth would work).
+This starts the API, PostgreSQL, and Redis, and runs database migrations automatically.
 
-For local development without rebuilding the container on every code change:
+API documentation: `http://127.0.0.1:8000/docs`
+
+The development `/token` endpoint can be used to obtain a JWT for local testing. It is development tooling and is not intended to represent a production authentication system.
+
+### Local development
+
+Start the dependencies:
+
 ```bash
-docker-compose up -d postgres redis   # just the dependencies
+docker compose up -d postgres redis
+```
+
+Install/sync Python dependencies:
+
+```bash
 uv sync
+```
+
+Apply migrations:
+
+```bash
 uv run alembic upgrade head
+```
+
+Start the API:
+
+```bash
 uv run uvicorn app.main:app --reload
 ```
 
-## Why
+### Run tests
 
-Wanted a project that goes past "call an LLM API and return the response" and actually deals with the things that break in production — concurrency bugs in budget tracking, what happens when a provider times out, that kind of thing. Not trying to make this look finished before it is.
+```bash
+uv run pytest tests -v
+```
+
+## Why this project?
+
+Calling an LLM API is the easy part.
+
+The interesting engineering problems appear around it:
+
+- What happens when many users share one budget?
+- How do you prevent concurrent requests from overspending?
+- How do you account for actual token usage?
+- What happens when the provider fails?
+- How do you stop repeatedly sending traffic to a failing provider?
+- How do you isolate tenants?
+- How do you rate-limit requests?
+- How do you recover a reservation if a process crashes?
+- How do you eventually support RAG without losing control of cost and reliability?
+
+This project is an attempt to build those systems, test them, understand their trade-offs, and document what is actually implemented rather than pretending unfinished infrastructure is production-ready.
