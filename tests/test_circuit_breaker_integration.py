@@ -36,6 +36,12 @@ class FakeModels:
         self.calls = 0
         self.should_fail = True
 
+    async def count_tokens(self, **kwargs):
+        class TokenCount:
+            total_tokens = 50
+
+        return TokenCount()
+
     async def generate_content(self, **kwargs):
         self.calls += 1
 

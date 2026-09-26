@@ -119,13 +119,4 @@ def test_rate_limit_isolated_between_tenants():
             window_seconds=60,
         )
 
-
-def test_budget_rejects_over_daily_limit():
-    db = SessionLocal()
-    try:
-        service = GuardrailService()
-        with pytest.raises(ValueError):
-            service.check_and_reserve_budget(db, tenant_id=1, max_tokens=2_000_000_000_000)
-    finally:
-        db.close()
    

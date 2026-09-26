@@ -43,7 +43,7 @@ class UsageService:
                 f"Limit: ${monthly_budget:.6f}"
             )
 
-        tenant.current_spend = float(current_spend + reserved_cost)
+        tenant.current_spend = current_spend + reserved_cost
 
         usage = UsageRecord(
             request_id=request_id,
@@ -91,8 +91,7 @@ class UsageService:
         refund = reserved_cost - actual_cost
 
         current_spend = Decimal(str(tenant.current_spend))
-
-        tenant.current_spend = float(current_spend - refund)
+        tenant.current_spend = current_spend - refund
 
         usage.input_tokens = input_tokens
         usage.output_tokens = output_tokens
@@ -122,10 +121,7 @@ class UsageService:
             raise ValueError(f"Tenant {usage.tenant_id} not found")
 
         current_spend = Decimal(str(tenant.current_spend))
-
-        tenant.current_spend = float(
-            current_spend - usage.reserved_cost
-        )
+        tenant.current_spend = current_spend - usage.reserved_cost
 
         usage.actual_cost = Decimal("0")
         usage.status = "failed"

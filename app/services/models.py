@@ -2,15 +2,22 @@ from datetime import datetime
 from decimal import Decimal
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from app.services.database import Base
-from sqlalchemy import ForeignKey, String, Float, DateTime, Numeric, func
+from sqlalchemy import ForeignKey, String, DateTime, Numeric, func
 
 
 class Tenant(Base):
     __tablename__ = "tenants"
     id: Mapped[int] = mapped_column(primary_key=True)
     name: Mapped[str] = mapped_column(String)
-    monthly_budget: Mapped[float] = mapped_column(Float, default=100.0)
-    current_spend: Mapped[float] = mapped_column(Float,default=0.0)
+    monthly_budget: Mapped[Decimal] = mapped_column(
+    Numeric(12, 6),
+    default=Decimal("100.000000"),
+    )
+
+    current_spend: Mapped[Decimal] = mapped_column(
+    Numeric(12, 6),
+    default=Decimal("0.000000"),
+    )
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
     
     users: Mapped[list["User"]] = relationship(back_populates="tenant")

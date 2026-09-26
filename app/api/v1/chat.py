@@ -12,7 +12,7 @@ from app.api.dependencies import (
 from app.schemas.chat import ChatRequest
 from app.services.circuit_breaker import circuit_breaker
 from app.services.database import get_db
-from app.services.guardrail import guardrail_service
+from app.services.cost_engine import cost_engine
 from app.services.models import Tenant
 from app.services.usage import usage_service
 
@@ -55,9 +55,19 @@ async def chat(
     # ─────────────────────────────────────
     # Calculate reservation
     # ─────────────────────────────────────
+        # Calculate reservation
 
-    reserved_cost = Decimal(
-        str(guardrail_service.estimate_cost(request.max_tokens))
+    token_count = await client.aio.models.count_tokens(
+        model=request.model,
+        contents=request.message,
+    )
+
+    input_tokens_estimate = token_count.total_tokens or 0
+
+    reserved_cost = cost_engine.estimate_reservation(
+        model=request.model,
+        input_tokens=input_tokens_estimate,
+        max_output_tokens=request.max_tokens,
     )
 
     # ─────────────────────────────────────
@@ -167,12 +177,12 @@ async def chat(
     # Calculate actual cost
     # ─────────────────────────────────────
 
-    actual_cost = Decimal(
-        str(
-            (total_tokens / 1000)
-            * guardrail_service.COST_PER_1000_TOKENS
-        )
+    actual_cost = cost_engine.calculate_actual_cost(
+    model=request.model,
+    input_tokens=input_tokens,
+    output_tokens=output_tokens,
     )
+    
 
     # ─────────────────────────────────────
     # Settle reservation
