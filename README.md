@@ -12,7 +12,7 @@ The goal is not to pretend this is a complete enterprise AI platform. The goal i
 - Reserves budget for a request *before* calling the LLM — estimated from real input tokens (the provider's `count_tokens` API) plus the maximum requested output — so two concurrent requests from the same tenant can't both slip through and blow the budget
 - Settles against actual usage after the call: refund the unused part of the reservation, add the shortfall if usage went over the estimate, release everything if the request failed
 - Circuit breaker around the LLM call — if the provider starts failing, stop hammering it and fail fast instead
-- Every request leaves an auditable `usage_records` row — request_id, tokens, reserved vs actual cost, status
+- LLM requests leave an auditable `usage_records` row — request_id, tokens, reserved vs actual cost, status
 - (planned) Checks on incoming requests for PII, prompt injection attempts, and leaked secrets
 - (planned) Caching repeated queries so identical requests don't hit the LLM twice
 - (planned) A separate path for file uploads — extract text, chunk it, embed it, store it for retrieval later
@@ -155,13 +155,26 @@ The gateway translates known failure conditions into controlled HTTP responses:
 | Invalid guardrail request, unsupported model | 400 |
 | Rate limit exceeded | 429 |
 | Redis/rate-limiter unavailable, circuit breaker open | 503 |
+| Provider token counting unavailable | 503 |
 | Upstream LLM failure | 502 |
+
 
 ## Current status
 
-Core gateway functionality is implemented and tested.
+The gateway currently provides:
 
-Current test suite: 35 tests passing.
+- JWT-based tenant/user authentication
+- Per-tenant Redis rate limiting
+- Model allowlisting and output-token limits
+- Provider-based input token counting
+- Budget reservation before LLM generation
+- Actual usage settlement with refund/overage handling
+- PostgreSQL-backed usage records
+- Circuit breaker protection around LLM generation
+- Fail-closed handling when provider token counting is unavailable
+- Automated API, guardrail, circuit-breaker, cost, and usage-accounting tests
+
+**Test suite: 37 tests passing**
 
 ### Implemented
 
@@ -175,18 +188,19 @@ Current test suite: 35 tests passing.
 - [x] PostgreSQL tenant/user models + Alembic migrations
 - [x] PostgreSQL-backed budget tracking with row-locked reservation
 - [x] Provider-native input token counting
+- [x] Fail-closed handling for provider token-counting failures
 - [x] Model-aware CostEngine
 - [x] Reservation/settlement lifecycle with actual usage-based costs
+- [x] Reservation settlement coverage for actual cost exceeding the reservation
 - [x] Failed-request reservation release
 - [x] NUMERIC(12,6) money storage with Python Decimal calculations
 - [x] Circuit breaker: closed/open/half-open, unit + integration tested
+- [x] Circuit-breaker failure path verifies tenant spend returns to baseline
 - [x] HTTP authentication and guardrail tests
 - [x] Docker Compose development stack
 
 ### Next
 
-- [ ] Reservation edge-case tests (actual usage above reservation, breaker failures restoring spend)
-- [ ] Explicit failure handling for provider `count_tokens()` calls
 - [ ] Upstream LLM timeout handling
 - [ ] Atomic Redis rate limiting using Lua
 - [ ] Stale reservation cleanup after process failure
