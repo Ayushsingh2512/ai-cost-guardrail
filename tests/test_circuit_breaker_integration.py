@@ -96,6 +96,8 @@ def test_circuit_breaker_full_lifecycle(db):
 
     db.add(tenant)
     db.flush()
+    
+    initial_spend = tenant.current_spend
 
     user = User(
         tenant_id=tenant.id,
@@ -169,8 +171,13 @@ def test_circuit_breaker_full_lifecycle(db):
                     json=payload,
                     headers=headers,
                 )
+                
 
                 assert response.status_code == 502
+                
+            db.refresh(tenant)
+
+            assert tenant.current_spend == initial_spend
 
             # Five consecutive failures should open the circuit
             assert circuit_breaker.state == CircuitState.OPEN

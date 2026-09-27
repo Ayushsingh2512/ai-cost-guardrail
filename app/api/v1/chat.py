@@ -1,8 +1,7 @@
-from decimal import Decimal
+from uuid import uuid4
 
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
-from uuid import uuid4
 
 from app.api.dependencies import (
     enforce_guardrails,
@@ -55,12 +54,17 @@ async def chat(
     # ─────────────────────────────────────
     # Calculate reservation
     # ─────────────────────────────────────
-        # Calculate reservation
 
-    token_count = await client.aio.models.count_tokens(
-        model=request.model,
-        contents=request.message,
-    )
+    try:
+        token_count = await client.aio.models.count_tokens(
+            model=request.model,
+            contents=request.message,
+        )
+    except Exception:
+        raise HTTPException(
+            status_code=503,
+            detail="LLM provider token counting is currently unavailable",
+        )
 
     input_tokens_estimate = token_count.total_tokens or 0
 
@@ -178,11 +182,10 @@ async def chat(
     # ─────────────────────────────────────
 
     actual_cost = cost_engine.calculate_actual_cost(
-    model=request.model,
-    input_tokens=input_tokens,
-    output_tokens=output_tokens,
+        model=request.model,
+        input_tokens=input_tokens,
+        output_tokens=output_tokens,
     )
-    
 
     # ─────────────────────────────────────
     # Settle reservation

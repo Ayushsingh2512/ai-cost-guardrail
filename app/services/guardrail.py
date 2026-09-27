@@ -1,23 +1,25 @@
 import redis
 
+
 class RateLimitExceeded(Exception):
     pass
 
 
 class GuardrailService:
     ALLOWED_MODELS = ["gemini-3-flash-preview", "gemini-2.5-flash"]
-    DAILY_BUDGET = 1.0
-
-    def __init__(self):
-        self.user_spend: dict[str, float] = {}
 
     def check_token_limit(self, max_tokens: int) -> None:
         if max_tokens > 2000:
-            raise ValueError(f"max_tokens ({max_tokens}) exceeds allowed limit of 2000")
+            raise ValueError(
+                f"max_tokens ({max_tokens}) exceeds allowed limit of 2000"
+            )
 
     def check_model_policy(self, model: str) -> None:
         if model not in self.ALLOWED_MODELS:
-            raise ValueError(f"Model '{model}' is not allowed. Allowed models: {self.ALLOWED_MODELS}")
+            raise ValueError(
+                f"Model '{model}' is not allowed. "
+                f"Allowed models: {self.ALLOWED_MODELS}"
+            )
 
     def check_rate_limit(
         self,
@@ -45,4 +47,4 @@ class GuardrailService:
             )
 
 
-guardrail_service = GuardrailService()  
+guardrail_service = GuardrailService()

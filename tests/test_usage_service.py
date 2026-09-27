@@ -144,3 +144,43 @@ def test_failed_request_releases_reservation(db):
 
     assert usage.status == "failed"
     assert usage.actual_cost == Decimal("0")
+    
+def test_successful_settlement_increases_spend_when_actual_cost_exceeds_reservation(
+    db,
+):
+    service = UsageService()
+
+    tenant, user = create_test_tenant_and_user(db)
+
+    reserved_cost = Decimal("0.050000")
+    actual_cost = Decimal("0.070000")
+
+    usage = service.reserve_budget(
+        db=db,
+        tenant_id=tenant.id,
+        request_id=f"request-{uuid4()}",
+        model="gemini-3-flash-preview",
+        user_id=user.id,
+        reserved_cost=reserved_cost,
+    )
+
+    service.settle_success(
+        db=db,
+        usage=usage,
+        actual_cost=actual_cost,
+        input_tokens=100,
+        output_tokens=400,
+        total_tokens=500,
+    )
+
+    db.refresh(tenant)
+    db.refresh(usage)
+
+    assert Decimal(str(tenant.current_spend)) == Decimal("0.070000")
+
+    assert usage.status == "completed"
+    assert usage.reserved_cost == reserved_cost
+    assert usage.actual_cost == actual_cost
+    assert usage.input_tokens == 100
+    assert usage.output_tokens == 400
+    assert usage.total_tokens == 500
