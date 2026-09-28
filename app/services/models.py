@@ -68,6 +68,10 @@ class UsageRecord(Base):
         nullable=False,
     )
 
+    thinking_tokens: Mapped[int] = mapped_column(
+        nullable=False,
+    )
+
     total_tokens: Mapped[int] = mapped_column(
         nullable=False,
     )

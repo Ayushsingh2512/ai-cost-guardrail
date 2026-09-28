@@ -12,7 +12,7 @@ The goal is not to pretend this is a complete enterprise AI platform. The goal i
 - Reserves budget for a request *before* calling the LLM — estimated from real input tokens (the provider's `count_tokens` API) plus the maximum requested output — so two concurrent requests from the same tenant can't both slip through and blow the budget
 - Settles against actual usage after the call: refund the unused part of the reservation, add the shortfall if usage went over the estimate, release everything if the request failed
 - Circuit breaker around the LLM call — if the provider starts failing, stop hammering it and fail fast instead
-- LLM requests leave an auditable `usage_records` row — request_id, tokens, reserved vs actual cost, status
+- LLM requests leave an auditable `usage_records` row — request_id, input/thinking/output/total tokens, reserved vs actual cost, status
 - (planned) Checks on incoming requests for PII, prompt injection attempts, and leaked secrets
 - (planned) Caching repeated queries so identical requests don't hit the LLM twice
 - (planned) A separate path for file uploads — extract text, chunk it, embed it, store it for retrieval later
@@ -86,6 +86,7 @@ For every request:
 7. Call the LLM.
 8. Read the provider's actual usage metadata.
 9. Calculate the actual cost.
+    - For Gemini thinking models, billable output usage includes both visible output tokens and thinking tokens.
 10. Settle the reservation:
     - actual cost lower than reservation → refund the difference
     - actual cost higher than reservation → increase spend to the actual cost
@@ -174,7 +175,7 @@ The gateway currently provides:
 - Fail-closed handling when provider token counting is unavailable
 - Automated API, guardrail, circuit-breaker, cost, and usage-accounting tests
 
-**Test suite: 37 tests passing**
+**Test suite: 38 tests passing**
 
 ### Implemented
 
@@ -190,6 +191,7 @@ The gateway currently provides:
 - [x] Provider-native input token counting
 - [x] Fail-closed handling for provider token-counting failures
 - [x] Model-aware CostEngine
+- [x] Gemini thinking-token-aware cost calculation
 - [x] Reservation/settlement lifecycle with actual usage-based costs
 - [x] Reservation settlement coverage for actual cost exceeding the reservation
 - [x] Failed-request reservation release

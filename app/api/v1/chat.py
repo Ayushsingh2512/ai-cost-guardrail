@@ -172,19 +172,20 @@ async def chat(
     usage_metadata = response.usage_metadata
 
     input_tokens = usage_metadata.prompt_token_count or 0
+    thinking_tokens = usage_metadata.thoughts_token_count or 0
     output_tokens = usage_metadata.candidates_token_count or 0
     total_tokens = usage_metadata.total_token_count or (
-        input_tokens + output_tokens
+    input_tokens + thinking_tokens + output_tokens
     )
-
     # ─────────────────────────────────────
     # Calculate actual cost
     # ─────────────────────────────────────
 
     actual_cost = cost_engine.calculate_actual_cost(
-        model=request.model,
-        input_tokens=input_tokens,
-        output_tokens=output_tokens,
+    model=request.model,
+    input_tokens=input_tokens,
+    thinking_tokens=thinking_tokens,
+    output_tokens=output_tokens,
     )
 
     # ─────────────────────────────────────
@@ -193,13 +194,14 @@ async def chat(
 
     try:
         usage_service.settle_success(
-            db=db,
-            usage=usage,
-            actual_cost=actual_cost,
-            input_tokens=input_tokens,
-            output_tokens=output_tokens,
-            total_tokens=total_tokens,
-        )
+        db=db,
+        usage=usage,
+        actual_cost=actual_cost,
+        input_tokens=input_tokens,
+        thinking_tokens=thinking_tokens,
+        output_tokens=output_tokens,
+        total_tokens=total_tokens,
+    )
 
         db.commit()
         db.refresh(usage)

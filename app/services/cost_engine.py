@@ -35,6 +35,7 @@ class CostEngine:
         self,
         model: str,
         input_tokens: int,
+        thinking_tokens: int,
         output_tokens: int,
     ) -> Decimal:
         pricing = self._get_pricing(model)
@@ -45,8 +46,10 @@ class CostEngine:
             * pricing["input_per_1m"]
         )
 
+        billable_output_tokens = thinking_tokens + output_tokens
+
         output_cost = (
-            Decimal(output_tokens)
+            Decimal(billable_output_tokens)
             / Decimal("1000000")
             * pricing["output_per_1m"]
         )

@@ -1,4 +1,3 @@
-
 from decimal import Decimal
 
 import pytest
@@ -8,12 +7,14 @@ from app.services.cost_engine import cost_engine
 
 def test_estimate_reservation():
     result = cost_engine.estimate_reservation(
-    model="gemini-3-flash-preview",
-    input_tokens=500,
-    max_output_tokens=1000,
-)
+        model="gemini-3-flash-preview",
+        input_tokens=500,
+        max_output_tokens=1000,
+    )
+
     assert result == Decimal("0.00325")
-    
+
+
 def test_reservation_accounts_for_large_input():
     result = cost_engine.estimate_reservation(
         model="gemini-3-flash-preview",
@@ -33,16 +34,29 @@ def test_calculate_actual_cost():
     result = cost_engine.calculate_actual_cost(
         model="gemini-3-flash-preview",
         input_tokens=500,
+        thinking_tokens=0,
         output_tokens=1000,
     )
 
     assert result == Decimal("0.00325")
 
 
+def test_calculate_actual_cost_includes_thinking_tokens():
+    result = cost_engine.calculate_actual_cost(
+        model="gemini-3-flash-preview",
+        input_tokens=500,
+        thinking_tokens=200,
+        output_tokens=1000,
+    )
+
+    assert result == Decimal("0.00385")
+
+
 def test_zero_tokens_cost_nothing():
     result = cost_engine.calculate_actual_cost(
         model="gemini-3-flash-preview",
         input_tokens=0,
+        thinking_tokens=0,
         output_tokens=0,
     )
 

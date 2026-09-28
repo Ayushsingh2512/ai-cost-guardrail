@@ -27,6 +27,7 @@ class FakeResponse:
             prompt_token_count = 50
             candidates_token_count = 50
             total_token_count = 100
+            thoughts_token_count = 0
 
         self.usage_metadata = UsageMetadata()
 

@@ -3,7 +3,7 @@ from uuid import uuid4
 
 import pytest
 
-from app.services.models import Tenant, User, UsageRecord
+from app.services.models import Tenant, User
 from app.services.usage import UsageService
 
 
@@ -99,8 +99,9 @@ def test_successful_settlement_refunds_unused_reservation(db):
         usage=usage,
         actual_cost=actual_cost,
         input_tokens=100,
+        thinking_tokens=50,
         output_tokens=200,
-        total_tokens=300,
+        total_tokens=350,
     )
 
     db.refresh(tenant)
@@ -112,8 +113,9 @@ def test_successful_settlement_refunds_unused_reservation(db):
     assert usage.reserved_cost == reserved_cost
     assert usage.actual_cost == actual_cost
     assert usage.input_tokens == 100
+    assert usage.thinking_tokens == 50
     assert usage.output_tokens == 200
-    assert usage.total_tokens == 300
+    assert usage.total_tokens == 350
 
 
 def test_failed_request_releases_reservation(db):
@@ -144,7 +146,8 @@ def test_failed_request_releases_reservation(db):
 
     assert usage.status == "failed"
     assert usage.actual_cost == Decimal("0")
-    
+
+
 def test_successful_settlement_increases_spend_when_actual_cost_exceeds_reservation(
     db,
 ):
@@ -169,8 +172,9 @@ def test_successful_settlement_increases_spend_when_actual_cost_exceeds_reservat
         usage=usage,
         actual_cost=actual_cost,
         input_tokens=100,
-        output_tokens=400,
-        total_tokens=500,
+        thinking_tokens=50,
+        output_tokens=200,
+        total_tokens=350,
     )
 
     db.refresh(tenant)
@@ -182,5 +186,6 @@ def test_successful_settlement_increases_spend_when_actual_cost_exceeds_reservat
     assert usage.reserved_cost == reserved_cost
     assert usage.actual_cost == actual_cost
     assert usage.input_tokens == 100
-    assert usage.output_tokens == 400
-    assert usage.total_tokens == 500
+    assert usage.thinking_tokens == 50
+    assert usage.output_tokens == 200
+    assert usage.total_tokens == 350

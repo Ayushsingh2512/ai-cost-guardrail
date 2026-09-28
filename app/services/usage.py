@@ -52,6 +52,7 @@ class UsageService:
             model=model,
             input_tokens=0,
             output_tokens=0,
+            thinking_tokens=0,
             total_tokens=0,
             reserved_cost=reserved_cost,
             actual_cost=Decimal("0"),
@@ -69,6 +70,7 @@ class UsageService:
         usage: UsageRecord,
         actual_cost: Decimal,
         input_tokens: int,
+        thinking_tokens: int,
         output_tokens: int,
         total_tokens: int,
     ) -> None:
@@ -94,6 +96,7 @@ class UsageService:
         tenant.current_spend = current_spend - refund
 
         usage.input_tokens = input_tokens
+        usage.thinking_tokens = thinking_tokens
         usage.output_tokens = output_tokens
         usage.total_tokens = total_tokens
         usage.actual_cost = actual_cost
