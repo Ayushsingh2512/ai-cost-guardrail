@@ -1,4 +1,6 @@
 from uuid import uuid4
+import httpx
+from google.genai import errors
 
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
@@ -58,13 +60,13 @@ async def chat(
     try:
         token_count = await client.aio.models.count_tokens(
             model=request.model,
-            contents=request.message,
-        )
-    except Exception:
+            conents=request.message,
+    )
+    except (errors.APIError, httpx.RequestError):
         raise HTTPException(
             status_code=503,
             detail="LLM provider token counting is currently unavailable",
-        )
+    )
 
     input_tokens_estimate = token_count.total_tokens or 0
 
@@ -175,46 +177,35 @@ async def chat(
     thinking_tokens = usage_metadata.thoughts_token_count or 0
     output_tokens = usage_metadata.candidates_token_count or 0
     total_tokens = usage_metadata.total_token_count or (
-    input_tokens + thinking_tokens + output_tokens
+        input_tokens + thinking_tokens + output_tokens
     )
-    # ─────────────────────────────────────
-    # Calculate actual cost
-    # ─────────────────────────────────────
 
     actual_cost = cost_engine.calculate_actual_cost(
-    model=request.model,
-    input_tokens=input_tokens,
-    thinking_tokens=thinking_tokens,
-    output_tokens=output_tokens,
-    )
-
-    # ─────────────────────────────────────
-    # Settle reservation
-    # ─────────────────────────────────────
-
-    try:
-        usage_service.settle_success(
-        db=db,
-        usage=usage,
-        actual_cost=actual_cost,
+        model=request.model,
         input_tokens=input_tokens,
         thinking_tokens=thinking_tokens,
         output_tokens=output_tokens,
-        total_tokens=total_tokens,
     )
 
+    try:
+        usage_service.settle_success(
+            db=db,
+            usage=usage,
+            actual_cost=actual_cost,
+            input_tokens=input_tokens,
+            thinking_tokens=thinking_tokens,
+            output_tokens=output_tokens,
+            total_tokens=total_tokens,
+        )
         db.commit()
         db.refresh(usage)
         db.refresh(tenant)
-
     except Exception:
         db.rollback()
-
         raise HTTPException(
             status_code=500,
             detail="LLM succeeded but usage settlement failed",
         )
-
     # ─────────────────────────────────────
     # Return response
     # ─────────────────────────────────────
@@ -225,6 +216,7 @@ async def chat(
         "user_id": user_id,
         "received_message": request.message,
         "input_tokens": input_tokens,
+        "thinking_tokens": thinking_tokens,
         "output_tokens": output_tokens,
         "total_tokens": total_tokens,
         "reserved_cost": float(usage.reserved_cost),

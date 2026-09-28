@@ -8,6 +8,8 @@ from app.api.dependencies import get_redis_client
 
 from app.services.guardrail import RateLimitExceeded
 
+import httpx
+
 
 client = TestClient(app)
 
@@ -200,7 +202,7 @@ def test_chat_returns_503_when_token_counting_fails(db):
             self.generate_called = False
 
         async def count_tokens(self, **kwargs):
-            raise RuntimeError("Simulated token counting failure")
+            raise httpx.ReadTimeout("Simulated token counting timeout")
 
         async def generate_content(self, **kwargs):
             self.generate_called = True
