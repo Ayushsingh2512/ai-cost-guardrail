@@ -60,8 +60,8 @@ async def chat(
     try:
         token_count = await client.aio.models.count_tokens(
             model=request.model,
-            conents=request.message,
-    )
+            contents=request.message,
+        )
     except (errors.APIError, httpx.RequestError):
         raise HTTPException(
             status_code=503,

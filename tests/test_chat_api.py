@@ -200,8 +200,10 @@ def test_chat_returns_503_when_token_counting_fails(db):
     class FakeModels:
         def __init__(self):
             self.generate_called = False
+            self.last_count_kwargs = None
 
         async def count_tokens(self, **kwargs):
+            self.last_count_kwargs = kwargs
             raise httpx.ReadTimeout("Simulated token counting timeout")
 
         async def generate_content(self, **kwargs):
@@ -265,6 +267,8 @@ def test_chat_returns_503_when_token_counting_fails(db):
         app.dependency_overrides.clear()
 
     assert response.status_code == 503
+    assert fake_client.aio.models.last_count_kwargs["contents"] == "Hello"
+    assert fake_client.aio.models.last_count_kwargs["model"] == "gemini-3-flash-preview"
     assert fake_client.aio.models.generate_called is False
 
     db.refresh(tenant)
