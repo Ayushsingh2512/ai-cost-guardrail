@@ -31,11 +31,21 @@ class GuardrailService:
         key = f"ratelimit:{tenant_id}"
 
         try:
-            current_count = redis_client.incr(key)
+            script = """
+            local count = redis.call("INCR", KEYS[1])
 
-            if current_count == 1:
-                redis_client.expire(key, window_seconds)
+            if count == 1 then
+                redis.call("EXPIRE", KEYS[1], ARGV[1])
+            end
+            return count
+            """
 
+            current_count = redis_client.eval(
+                script,
+                1,
+                key,
+                window_seconds,
+            )
         except redis.exceptions.RedisError as e:
             raise RuntimeError(
                 "Rate limiting service is unavailable"

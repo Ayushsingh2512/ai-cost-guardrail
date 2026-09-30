@@ -20,7 +20,8 @@ The goal is not to pretend this is a complete enterprise AI platform. The goal i
 ## Architecture
 
 ![Architecture diagram](./docs/architecture_diagram.png)
-This is the target design, not what's built yet.
+This diagram represents the current gateway architecture.
+Some extensions shown in the broader project scope remain future work.
 
 ## How the request flows
 
@@ -200,11 +201,11 @@ The gateway currently provides:
 - [x] Circuit-breaker failure path verifies tenant spend returns to baseline
 - [x] HTTP authentication and guardrail tests
 - [x] Docker Compose development stack
+- [x] Atomic Redis rate limiting using Lua
 
 ### Next
 
 - [ ] Upstream LLM timeout handling
-- [ ] Atomic Redis rate limiting using Lua
 - [ ] Stale reservation cleanup after process failure
 - [ ] Security checks for PII, prompt injection, and leaked secrets
 - [ ] Observability: structured logs, metrics, and request tracing

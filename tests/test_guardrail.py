@@ -46,7 +46,7 @@ def test_rate_limit_allows_requests_up_to_limit():
         )
 
 
-def test_rate_limit_sets_expiration():
+def test_rate_limit_sets_expiration_without_refreshing_window():
     service = GuardrailService()
     client = get_redis_client()
 
@@ -60,14 +60,25 @@ def test_rate_limit_sets_expiration():
         window_seconds=60,
     )
 
-    ttl = client.ttl(key)
+    first_ttl = client.ttl(key)
 
-    assert 0 < ttl <= 60
+    assert 0 < first_ttl <= 60
+
+    service.check_rate_limit(
+        client,
+        tenant_id=1002,
+        limit=30,
+        window_seconds=60,
+    )
+
+    second_ttl = client.ttl(key)
+
+    assert 0 < second_ttl <= first_ttl
 def test_rate_limit_fails_when_redis_is_unavailable():
     service = GuardrailService()
 
     class BrokenRedis:
-        def incr(self, key):
+        def eval(self, script, numkeys, *args):
             raise redis.exceptions.ConnectionError("Redis unavailable")
 
     with pytest.raises(
