@@ -27,3 +27,4 @@ coverage.xml
 # IDE / editor files
 .vscode/
 .idea/
+*.sql
