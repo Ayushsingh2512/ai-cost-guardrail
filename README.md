@@ -13,9 +13,11 @@ The goal is not to pretend this is a complete enterprise AI platform. The goal i
 - Settles against actual usage after the call: refund the unused part of the reservation, add the shortfall if usage went over the estimate, release everything if the request failed
 - Circuit breaker around the LLM call — if the provider starts failing, stop hammering it and fail fast instead
 - LLM requests leave an auditable `usage_records` row — request_id, input/thinking/output/total tokens, reserved vs actual cost, status
+- RAG document-processing foundation — PDF text extraction, deterministic chunking, Gemini embeddings, and async grounded generation with       validated citations
+- (planned) Vector-store-backed retrieval and full RAG request integration
 - (planned) Checks on incoming requests for PII, prompt injection attempts, and leaked secrets
 - (planned) Caching repeated queries so identical requests don't hit the LLM twice
-- (planned) A separate path for file uploads — extract text, chunk it, embed it, store it for retrieval later
+
 
 ## Architecture
 
@@ -176,7 +178,7 @@ The gateway currently provides:
 - Fail-closed handling when provider token counting is unavailable
 - Automated API, guardrail, circuit-breaker, cost, and usage-accounting tests
 
-**Test suite: 38 tests passing**
+**Test suite: 101 tests passing**
 
 ### Implemented
 
@@ -202,6 +204,12 @@ The gateway currently provides:
 - [x] HTTP authentication and guardrail tests
 - [x] Docker Compose development stack
 - [x] Atomic Redis rate limiting using Lua
+- [x] PDF text extraction with page-level provenance
+- [x] Deterministic structure-aware document chunking
+- [x] Gemini `gemini-embedding-001` document/query embeddings
+- [x] Async retrieval-grounded generation
+- [x] Numbered citation validation and provenance tracking
+- [x] Generation provider error and safety handling
 
 ### Next
 
@@ -210,24 +218,57 @@ The gateway currently provides:
 - [ ] Security checks for PII, prompt injection, and leaked secrets
 - [ ] Observability: structured logs, metrics, and request tracing
 - [ ] Harden `/token` and `/tenants` development endpoints
-- [ ] RAG/document ingestion workload
+- [ ] Vector-store-backed retrieval
+- [ ] End-to-end RAG pipeline integration
+- [ ] RAG workload hardening and evaluation
 - [ ] Caching layer
 - [ ] Distributed circuit breaker
 
 ## RAG workload
 
-RAG is part of the broader planned scope of the gateway, but it is not yet implemented.
+## RAG workload
 
-The planned flow:
+The gateway now contains the foundation of its RAG workload.
 
-```
-Documents → Text Extraction → Chunking → Embeddings → Vector Storage
-        → Retrieval → Relevant Context → LLM Gateway → Response
-```
+Implemented so far:
 
-The gateway is intended to provide the infrastructure around the RAG workload — authentication, tenant isolation, rate limiting, token/cost accounting, budget enforcement, and provider reliability.
+```text
+PDF
+ ↓
+Text Extraction
+ ↓
+Page-Level Provenance
+ ↓
+Deterministic Chunking
+ ↓
+Gemini Embeddings
+ ↓
+Grounded Generation
+ ↓
+Validated Citations
 
-RAG implementation is intentionally scheduled after the core gateway is stable.
+The current RAG generation layer is intentionally independent of the vector store. It accepts retrieved context as a small provider-independent ContextPassage type and returns a structured GenerationResult containing the answer, validated citations, provenance of passages sent to the model, provider metadata, finish reason, and prompt version.
+The generation layer also:
+- uses the asynchronous Google GenAI API
+- refuses to call the LLM when no evidence is available
+- treats retrieved document content as untrusted data rather than instructions
+- validates citation markers against the passages actually supplied
+- records invalid citation markers separately
+- distinguishes expected safety blocks from provider failures
+The remaining RAG work is:
+      Embeddings
+          ↓
+      Vector Store
+          ↓
+      Retrieval
+          ↓
+      ContextPassage[]
+          ↓
+      Grounded Generation
+          ↓
+      Gateway Integration
+
+The vector-store choice is intentionally still undecided and will be evaluated based on persistence, tenant filtering, deployment simplicity, retrieval quality, and learning value.
 
 ## Scope
 
@@ -239,9 +280,9 @@ RAG, caching, additional providers behind a common interface, distributed rate l
 
 ## Stack
 
-**In use:** Python, FastAPI, PostgreSQL, SQLAlchemy, Alembic, Redis, JWT, Google Gemini, uv, pytest, Docker / Docker Compose
+**In use:** Python, FastAPI, PostgreSQL, SQLAlchemy, Alembic, Redis, JWT, Google Gemini, Google GenAI SDK, PyMuPDF, uv, pytest, Docker / Docker Compose
 
-**Planned:** PGVector, additional LLM provider, RAG retrieval pipeline, semantic caching, background processing
+**Planned:** Vector store (decision pending), RAG retrieval pipeline, additional LLM provider, semantic caching, background processing
 
 ## Running locally
 
@@ -304,5 +345,6 @@ The interesting engineering problems appear around it:
 - How do you rate-limit requests?
 - How do you recover a reservation if a process crashes?
 - How do you eventually support RAG without losing control of cost and reliability?
+- How do you verify that a generated answer is actually supported by retrieved evidence?
 
 This project is an attempt to build those systems, test them, understand their trade-offs, and document what is actually implemented rather than pretending unfinished infrastructure is production-ready.
