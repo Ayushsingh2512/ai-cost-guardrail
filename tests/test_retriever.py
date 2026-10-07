@@ -1,5 +1,3 @@
-from uuid import uuid4
-
 import pytest
 
 from app.rag.embeddings import EmbeddingConfig
@@ -12,6 +10,7 @@ from app.services.models import (
 
 
 EMBEDDING_DIMS = EmbeddingConfig().dimensions
+TEST_FINGERPRINT = "test/gemini-embedding-001/768"
 
 
 def make_vector(index: int) -> list[float]:
@@ -38,7 +37,7 @@ def make_chunk(
         text=text,
         metadata_={"source": source},
         embedding=embedding,
-        fingerprint="test/gemini-embedding-001/768",
+        fingerprint=TEST_FINGERPRINT,
     )
 
 
@@ -83,10 +82,11 @@ def test_retriever_returns_nearest_chunks_in_cosine_order(db):
 
     retriever = Retriever(db)
 
-    results = retriever.retrieve(
+    results = retriever.search(
         tenant_id=tenant.id,
-        query_vector=make_vector(0),
-        top_k=2,
+        vector=make_vector(0),
+        k=2,
+        fingerprint=TEST_FINGERPRINT,
     )
 
     assert len(results) == 2
@@ -146,10 +146,11 @@ def test_retriever_isolates_tenants(db):
 
     retriever = Retriever(db)
 
-    results = retriever.retrieve(
+    results = retriever.search(
         tenant_id=tenant_a.id,
-        query_vector=make_vector(0),
-        top_k=10,
+        vector=make_vector(0),
+        k=10,
+        fingerprint=TEST_FINGERPRINT,
     )
 
     assert len(results) == 1
@@ -187,10 +188,11 @@ def test_retriever_preserves_provenance(db):
 
     retriever = Retriever(db)
 
-    results = retriever.retrieve(
+    results = retriever.search(
         tenant_id=tenant.id,
-        query_vector=make_vector(0),
-        top_k=1,
+        vector=make_vector(0),
+        k=1,
+        fingerprint=TEST_FINGERPRINT,
     )
 
     assert len(results) == 1
@@ -211,10 +213,11 @@ def test_retriever_returns_empty_for_tenant_without_documents(db):
 
     retriever = Retriever(db)
 
-    results = retriever.retrieve(
+    results = retriever.search(
         tenant_id=tenant.id,
-        query_vector=make_vector(0),
-        top_k=5,
+        vector=make_vector(0),
+        k=5,
+        fingerprint=TEST_FINGERPRINT,
     )
 
     assert results == []
@@ -224,15 +227,140 @@ def test_retriever_rejects_invalid_arguments(db):
     retriever = Retriever(db)
 
     with pytest.raises(ValueError):
-        retriever.retrieve(
+        retriever.search(
             tenant_id=1,
-            query_vector=make_vector(0),
-            top_k=0,
+            vector=make_vector(0),
+            k=0,
+            fingerprint=TEST_FINGERPRINT,
         )
 
     with pytest.raises(ValueError):
-        retriever.retrieve(
+        retriever.search(
             tenant_id=1,
-            query_vector=[],
-            top_k=5,
+            vector=[],
+            k=5,
+            fingerprint=TEST_FINGERPRINT,
         )
+
+    with pytest.raises(ValueError):
+        retriever.search(
+            tenant_id=1,
+            vector=make_vector(0),
+            k=5,
+            fingerprint="",
+        )
+
+    with pytest.raises(ValueError):
+        retriever.search(
+            tenant_id=1,
+            vector=make_vector(0),
+            k=5,
+            fingerprint=TEST_FINGERPRINT,
+            max_distance=-0.1,
+        )
+
+
+def test_retriever_filters_by_embedding_fingerprint(db):
+    tenant = Tenant(
+        name="Fingerprint Tenant",
+        monthly_budget=100.0,
+        current_spend=0.0,
+    )
+    db.add(tenant)
+    db.flush()
+
+    document = Document(
+        tenant_id=tenant.id,
+        source="fingerprint-test.pdf",
+    )
+    db.add(document)
+    db.flush()
+
+    matching_chunk = make_chunk(
+        tenant_id=tenant.id,
+        document_id=document.id,
+        chunk_index=0,
+        text="Matching embedding configuration",
+        embedding=make_vector(0),
+        source="fingerprint-test.pdf",
+        page=1,
+    )
+
+    old_config_chunk = make_chunk(
+        tenant_id=tenant.id,
+        document_id=document.id,
+        chunk_index=1,
+        text="Old embedding configuration",
+        embedding=make_vector(0),
+        source="fingerprint-test.pdf",
+        page=2,
+    )
+    old_config_chunk.fingerprint = "old-model/1536"
+
+    db.add_all([matching_chunk, old_config_chunk])
+    db.commit()
+
+    retriever = Retriever(db)
+
+    results = retriever.search(
+        tenant_id=tenant.id,
+        vector=make_vector(0),
+        k=10,
+        fingerprint=TEST_FINGERPRINT,
+    )
+
+    assert len(results) == 1
+    assert results[0].text == "Matching embedding configuration"
+
+
+def test_retriever_can_apply_max_distance(db):
+    tenant = Tenant(
+        name="Distance Tenant",
+        monthly_budget=100.0,
+        current_spend=0.0,
+    )
+    db.add(tenant)
+    db.flush()
+
+    document = Document(
+        tenant_id=tenant.id,
+        source="distance-test.pdf",
+    )
+    db.add(document)
+    db.flush()
+
+    close_chunk = make_chunk(
+        tenant_id=tenant.id,
+        document_id=document.id,
+        chunk_index=0,
+        text="Close chunk",
+        embedding=make_vector(0),
+        source="distance-test.pdf",
+        page=1,
+    )
+
+    distant_chunk = make_chunk(
+        tenant_id=tenant.id,
+        document_id=document.id,
+        chunk_index=1,
+        text="Distant chunk",
+        embedding=make_vector(1),
+        source="distance-test.pdf",
+        page=2,
+    )
+
+    db.add_all([close_chunk, distant_chunk])
+    db.commit()
+
+    retriever = Retriever(db)
+
+    results = retriever.search(
+        tenant_id=tenant.id,
+        vector=make_vector(0),
+        k=10,
+        fingerprint=TEST_FINGERPRINT,
+        max_distance=0.1,
+    )
+
+    assert len(results) == 1
+    assert results[0].text == "Close chunk"

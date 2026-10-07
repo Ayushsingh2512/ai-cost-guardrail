@@ -15,21 +15,29 @@ class Retriever:
     def __init__(self, db: Session) -> None:
         self._db = db
 
-    def retrieve(
+    def search(
         self,
         *,
         tenant_id: int,
-        query_vector: Sequence[float],
-        top_k: int = 5,
+        vector: Sequence[float],
+        k: int = 5,
+        fingerprint: str,
+        max_distance: float | None = None,
     ) -> list[ContextPassage]:
-        if top_k <= 0:
-            raise ValueError("top_k must be greater than zero")
+        if k <= 0:
+            raise ValueError("k must be greater than zero")
 
-        if not query_vector:
-            raise ValueError("query_vector must not be empty")
+        if not vector:
+            raise ValueError("vector must not be empty")
+
+        if not fingerprint:
+            raise ValueError("fingerprint must not be empty")
+
+        if max_distance is not None and max_distance < 0:
+            raise ValueError("max_distance must not be negative")
 
         distance = DocumentChunkRecord.embedding.cosine_distance(
-            list(query_vector)
+            list(vector)
         )
 
         statement = (
@@ -41,10 +49,14 @@ class Retriever:
             .where(
                 Document.tenant_id == tenant_id,
                 DocumentChunkRecord.tenant_id == tenant_id,
+                DocumentChunkRecord.fingerprint == fingerprint,
             )
             .order_by(distance)
-            .limit(top_k)
+            .limit(k)
         )
+
+        if max_distance is not None:
+            statement = statement.where(distance <= max_distance)
 
         chunks = self._db.scalars(statement).all()
 
@@ -53,15 +65,12 @@ class Retriever:
         for chunk in chunks:
             metadata = chunk.metadata_ or {}
 
-            source = metadata.get("source")
-            page = chunk.page
-
             passages.append(
                 ContextPassage(
                     ref=(str(chunk.document_id), chunk.chunk_index),
                     text=chunk.text,
-                    source=source,
-                    page=page,
+                    source=metadata.get("source"),
+                    page=chunk.page,
                 )
             )
 
