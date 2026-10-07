@@ -4,11 +4,15 @@ from google import genai
 
 from app.core.security import verify_access_token
 from app.schemas.chat import ChatRequest
-from app.services.guardrail import guardrail_service, RateLimitExceeded
+from app.schemas.rag import RAGRequest
+from app.services.guardrail import RateLimitExceeded, guardrail_service
 from app.services.redis_client import get_redis_client
 
 
 security = HTTPBearer()
+
+RAG_MODEL = "gemini-3-flash-preview"
+RAG_MAX_OUTPUT_TOKENS = 2000
 
 
 def get_genai_client():
@@ -47,15 +51,17 @@ def get_current_user(
         )
 
 
-def enforce_guardrails(
-    request: ChatRequest,
-    current_user: dict = Depends(get_current_user),
-    redis_client=Depends(get_redis_client),
-) -> ChatRequest:
+def _check_guardrails(
+    *,
+    current_user: dict,
+    redis_client,
+    model: str,
+    max_tokens: int,
+) -> None:
     try:
-        guardrail_service.check_token_limit(request.max_tokens)
+        guardrail_service.check_token_limit(max_tokens)
 
-        guardrail_service.check_model_policy(request.model)
+        guardrail_service.check_model_policy(model)
 
         guardrail_service.check_rate_limit(
             redis_client,
@@ -79,5 +85,33 @@ def enforce_guardrails(
             status_code=400,
             detail=str(e),
         )
+
+
+def enforce_guardrails(
+    request: ChatRequest,
+    current_user: dict = Depends(get_current_user),
+    redis_client=Depends(get_redis_client),
+) -> ChatRequest:
+    _check_guardrails(
+        current_user=current_user,
+        redis_client=redis_client,
+        model=request.model,
+        max_tokens=request.max_tokens,
+    )
+
+    return request
+
+
+def enforce_rag_guardrails(
+    request: RAGRequest,
+    current_user: dict = Depends(get_current_user),
+    redis_client=Depends(get_redis_client),
+) -> RAGRequest:
+    _check_guardrails(
+        current_user=current_user,
+        redis_client=redis_client,
+        model=RAG_MODEL,
+        max_tokens=RAG_MAX_OUTPUT_TOKENS,
+    )
 
     return request

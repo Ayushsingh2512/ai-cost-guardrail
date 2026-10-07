@@ -1,22 +1,23 @@
-from datetime import datetime
-from decimal import Decimal
-from sqlalchemy.orm import Mapped, mapped_column, relationship
-from app.services.database import Base
-from sqlalchemy import ForeignKey, String, DateTime, Numeric, func
 import uuid
 from datetime import datetime
+from decimal import Decimal
 
 from pgvector.sqlalchemy import Vector
 from sqlalchemy import (
+    DateTime,
     ForeignKey,
     ForeignKeyConstraint,
     Integer,
+    Numeric,
+    String,
     Text,
     UniqueConstraint,
     func,
 )
 from sqlalchemy.dialects.postgresql import JSONB, UUID
-from sqlalchemy.orm import Mapped, mapped_column
+from sqlalchemy.orm import Mapped, mapped_column, relationship
+
+from app.services.database import Base
 
 EMBEDDING_DIMS = 768
 
@@ -141,14 +142,26 @@ class User(Base):
     
 class UsageRecord(Base):
     __tablename__ = "usage_records"
+    
+    __table_args__ = (
+        UniqueConstraint(
+            "request_id",
+            "operation",
+            name="uq_usage_records_request_operation",
+        ),
+    )
 
     id: Mapped[int] = mapped_column(primary_key=True)
 
     request_id: Mapped[str] = mapped_column(
         String,
-        unique=True,
         nullable=False,
         index=True,
+    )
+
+    operation: Mapped[str] = mapped_column(
+        String(20),
+        nullable=False,
     )
 
     tenant_id: Mapped[int] = mapped_column(

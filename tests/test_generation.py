@@ -461,3 +461,82 @@ def test_generation_config_rejects_empty_model():
         GenerationConfig(
             model="   "
         )
+        
+def test_generation_config_defaults_max_output_tokens():
+    config = GenerationConfig()
+
+    assert config.max_output_tokens == 2000
+
+
+def test_generation_config_accepts_custom_max_output_tokens():
+    config = GenerationConfig(
+        max_output_tokens=1000,
+    )
+
+    assert config.max_output_tokens == 1000
+
+
+@pytest.mark.parametrize("max_output_tokens", [0, -1])
+def test_generation_config_rejects_invalid_max_output_tokens(
+    max_output_tokens,
+):
+    with pytest.raises(
+        ValueError,
+        match="max_output_tokens must be greater than zero",
+    ):
+        GenerationConfig(
+            max_output_tokens=max_output_tokens,
+        )
+
+
+@pytest.mark.asyncio
+async def test_generate_passes_max_output_tokens_to_provider():
+    captured = {}
+
+    class FakeModels:
+        async def generate_content(self, **kwargs):
+            captured.update(kwargs)
+
+            return SimpleNamespace(
+                text="The answer is supported. [1]",
+                usage_metadata=SimpleNamespace(
+                    prompt_token_count=10,
+                    candidates_token_count=5,
+                ),
+                candidates=[
+                    SimpleNamespace(
+                        finish_reason="STOP",
+                    )
+                ],
+                prompt_feedback=None,
+            )
+
+    class FakeAio:
+        def __init__(self):
+            self.models = FakeModels()
+
+    class FakeClient:
+        def __init__(self):
+            self.aio = FakeAio()
+
+    service = GenerationService(
+        config=GenerationConfig(
+            max_output_tokens=1500,
+        ),
+        client=FakeClient(),
+    )
+
+    passage = ContextPassage(
+        ref=("doc-1", 0),
+        text="The company provides 20 days of annual leave.",
+        source="handbook.pdf",
+        page=3,
+    )
+
+    result = await service.generate(
+        query="How many annual leave days are provided?",
+        passages=[passage],
+    )
+
+    assert result.status == "answered"
+    assert captured["config"].max_output_tokens == 1500

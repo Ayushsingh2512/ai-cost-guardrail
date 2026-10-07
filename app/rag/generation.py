@@ -131,6 +131,7 @@ class GenerationResult:
 class GenerationConfig:
     model: str = DEFAULT_MODEL
     temperature: float = DEFAULT_TEMPERATURE
+    max_output_tokens: int = 2000
 
     def __post_init__(self) -> None:
         if not self.model.strip():
@@ -141,6 +142,10 @@ class GenerationConfig:
                 "temperature must be between 0.0 and 2.0"
             )
 
+        if self.max_output_tokens <= 0:
+            raise ValueError(
+                "max_output_tokens must be greater than zero"
+            )
 
 class GenerationService:
     """
@@ -229,6 +234,7 @@ class GenerationService:
                 config=types.GenerateContentConfig(
                     system_instruction=SYSTEM_INSTRUCTION,
                     temperature=self.config.temperature,
+                    max_output_tokens=self.config.max_output_tokens,
                 ),
             )
 
@@ -586,5 +592,6 @@ generation_service = GenerationService(
     config=GenerationConfig(
         model=settings.generation_model,
         temperature=settings.generation_temperature,
+        max_output_tokens=2000,
     )
 )

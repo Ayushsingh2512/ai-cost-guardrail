@@ -18,6 +18,7 @@ DEFAULT_BATCH_SIZE = 50
 DEFAULT_MAX_RETRIES = 3
 
 
+
 class EmbeddingError(Exception):
     """Base class for embedding-related failures."""
 
