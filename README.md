@@ -1,33 +1,43 @@
 # ai-cost-guardrail
 
-A backend/system-design learning project for building an LLM Cost & Guardrail Gateway — a service that sits between applications and LLM providers and handles the infrastructure around LLM calls: authentication, tenant isolation, rate limiting, budget enforcement, cost accounting, usage auditing, and failure handling.
+A backend/system-design learning project for building an LLM Cost & Guardrail Gateway — a service that sits between applications and LLM providers and handles the infrastructure around LLM calls: authentication, tenant isolation, rate limiting, budget enforcement, cost accounting, usage auditing, reliability, and RAG retrieval.
 
 The goal is not to pretend this is a complete enterprise AI platform. The goal is to build and understand the engineering problems that appear around real LLM workloads.
 
-## What it does (or will do)
+---
+
+## What it does
 
 - Auth + tenant/user identification via JWT
 - Per-tenant rate limiting using Redis — distinct `429` response so clients know to back off, not that their request was invalid
 - Model policy + output token limits checked before a request goes anywhere
-- Reserves budget for a request *before* calling the LLM — estimated from real input tokens (the provider's `count_tokens` API) plus the maximum requested output — so two concurrent requests from the same tenant can't both slip through and blow the budget
-- Settles against actual usage after the call: refund the unused part of the reservation, add the shortfall if usage went over the estimate, release everything if the request failed
+- Reserves budget for a request **before** calling the LLM — estimated from real input tokens using the provider's `count_tokens` API plus the maximum requested output — so concurrent requests from the same tenant cannot independently overspend the remaining budget
+- Settles against actual usage after the call: refund the unused part of the reservation, add the shortfall if usage exceeded the estimate, and release everything if the request failed
 - Circuit breaker around the LLM call — if the provider starts failing, stop hammering it and fail fast instead
-- LLM requests leave an auditable `usage_records` row — request_id, input/thinking/output/total tokens, reserved vs actual cost, status
-- RAG document-processing foundation — PDF text extraction, deterministic chunking, Gemini embeddings, and async grounded generation with       validated citations
-- (planned) Vector-store-backed retrieval and full RAG request integration
-- (planned) Checks on incoming requests for PII, prompt injection attempts, and leaked secrets
-- (planned) Caching repeated queries so identical requests don't hit the LLM twice
+- LLM requests leave an auditable `usage_records` row containing request ID, input/thinking/output/total tokens, reserved vs actual cost, and status
+- RAG document-processing foundation — PDF text extraction, page-level provenance, deterministic chunking, Gemini embeddings, PostgreSQL + pgvector storage, and async grounded generation with validated citations
+- Tenant-scoped document and chunk ownership enforced at the database level
+- Embedding vectors stored as `vector(768)` with an embedding fingerprint for configuration tracking
+- Database cascade deletion from documents to their chunks
+- Planned exact vector retrieval and full RAG request integration
+- Planned checks on incoming requests for PII, prompt injection attempts, and leaked secrets
+- Planned caching of repeated queries so identical requests don't hit the LLM twice
 
+---
 
 ## Architecture
 
 ![Architecture diagram](./docs/architecture_diagram.png)
+
 This diagram represents the current gateway architecture.
+
 Some extensions shown in the broader project scope remain future work.
+
+---
 
 ## How the request flows
 
-```
+```text
 Client
   │
   ▼
@@ -38,9 +48,9 @@ Tenant / User Identification
   │
   ▼
 Guardrails
- ├── Model Policy
- ├── Output Token Limit
- └── Redis Rate Limit
+  ├── Model Policy
+  ├── Output Token Limit
+  └── Redis Rate Limit
   │
   ▼
 Provider Token Counting
@@ -62,7 +72,7 @@ LLM Provider
 Success         Failure
   │               │
   ▼               ▼
-Actual Usage    Release Reservation
+Actual Usage   Release Reservation
   │
   ▼
 Cost Settlement
@@ -73,6 +83,43 @@ Usage Record
   ▼
 Response
 ```
+
+For RAG requests, retrieval fits into the gateway before generation:
+
+```text
+Client
+  │
+  ▼
+Authentication
+  │
+  ▼
+Guardrails
+  │
+  ▼
+Query Embedding
+  │
+  ▼
+PostgreSQL + pgvector
+  │
+  ▼
+Tenant-Scoped Retrieval
+  │
+  ▼
+ContextPassage[]
+  │
+  ▼
+Grounded Generation
+  │
+  ▼
+Usage Settlement
+  │
+  ▼
+Response
+```
+
+The retrieval layer is intentionally kept separate from the generation layer so that generation does not depend on a particular vector-store implementation.
+
+---
 
 ## How the money works
 
@@ -89,14 +136,15 @@ For every request:
 7. Call the LLM.
 8. Read the provider's actual usage metadata.
 9. Calculate the actual cost.
-    - For Gemini thinking models, billable output usage includes both visible output tokens and thinking tokens.
+   - For Gemini thinking models, billable output usage includes both visible output tokens and thinking tokens.
 10. Settle the reservation:
-    - actual cost lower than reservation → refund the difference
-    - actual cost higher than reservation → increase spend to the actual cost
-    - request failure → release the reservation
+   - actual cost lower than reservation → refund the difference
+   - actual cost higher than reservation → increase spend to the actual cost
+   - request failure → release the reservation
 
 Money is stored using PostgreSQL `NUMERIC(12,6)` and handled with Python `Decimal` rather than floating-point arithmetic.
 
+---
 
 ## Concurrency
 
@@ -104,34 +152,42 @@ Budget enforcement is backed by PostgreSQL rather than an in-memory counter.
 
 The tenant row is locked during reservation:
 
-```
+```text
 Request A ─────┐
                │
                ▼
           Lock tenant
                │
+               ▼
           Check budget
                │
-           Reserve
+               ▼
+             Reserve
                │
-            Commit
+               ▼
+             Commit
                │
+               ▼
           Release lock
                │
 Request B ──────────────────► Lock tenant
-                              │
-                         Check updated budget
-                              │
-                            ...
+                                  │
+                                  ▼
+                           Check updated budget
+                                  │
+                                  ▼
+                                ...
 ```
 
-This prevents concurrent requests from independently seeing the same remaining budget and both spending it.
+This prevents concurrent requests from independently seeing the same remaining budget and both spending against it.
+
+---
 
 ## Circuit breaker
 
 The gateway uses a circuit breaker around the upstream LLM call.
 
-```
+```text
 CLOSED
   │
   │ repeated failures
@@ -144,17 +200,19 @@ HALF_OPEN
   │
   ├── success ──► CLOSED
   │
-  └── failure ─► OPEN
+  └── failure ──► OPEN
 ```
 
 The current circuit breaker is per-process in-memory state. A distributed circuit breaker shared across multiple API instances is future work.
+
+---
 
 ## API failure mapping
 
 The gateway translates known failure conditions into controlled HTTP responses:
 
 | Condition | Response |
-|---|---|
+|---|---:|
 | Missing / invalid authentication, invalid token claims | 401 |
 | Invalid guardrail request, unsupported model | 400 |
 | Rate limit exceeded | 429 |
@@ -162,6 +220,7 @@ The gateway translates known failure conditions into controlled HTTP responses:
 | Provider token counting unavailable | 503 |
 | Upstream LLM failure | 502 |
 
+---
 
 ## Current status
 
@@ -176,11 +235,15 @@ The gateway currently provides:
 - PostgreSQL-backed usage records
 - Circuit breaker protection around LLM generation
 - Fail-closed handling when provider token counting is unavailable
-- Automated API, guardrail, circuit-breaker, cost, and usage-accounting tests
+- PostgreSQL + pgvector RAG storage
+- Tenant-scoped document/chunk integrity constraints
+- Automated API, guardrail, circuit-breaker, cost, usage-accounting, and RAG schema tests
 
-**Test suite: 101 tests passing**
+**Test suite: 104 tests passing**
 
-### Implemented
+---
+
+## Implemented
 
 - [x] Project setup and dependency management
 - [x] FastAPI application structure
@@ -188,7 +251,7 @@ The gateway currently provides:
 - [x] JWT authentication with tenant/user identification
 - [x] Authentication failure handling
 - [x] Model policy and output-token limits
-- [x] Redis-backed per-tenant rate limiting (incl. Redis-unavailable handling)
+- [x] Redis-backed per-tenant rate limiting (including Redis-unavailable handling)
 - [x] PostgreSQL tenant/user models + Alembic migrations
 - [x] PostgreSQL-backed budget tracking with row-locked reservation
 - [x] Provider-native input token counting
@@ -198,7 +261,7 @@ The gateway currently provides:
 - [x] Reservation/settlement lifecycle with actual usage-based costs
 - [x] Reservation settlement coverage for actual cost exceeding the reservation
 - [x] Failed-request reservation release
-- [x] NUMERIC(12,6) money storage with Python Decimal calculations
+- [x] `NUMERIC(12,6)` money storage with Python `Decimal` calculations
 - [x] Circuit breaker: closed/open/half-open, unit + integration tested
 - [x] Circuit-breaker failure path verifies tenant spend returns to baseline
 - [x] HTTP authentication and guardrail tests
@@ -207,24 +270,38 @@ The gateway currently provides:
 - [x] PDF text extraction with page-level provenance
 - [x] Deterministic structure-aware document chunking
 - [x] Gemini `gemini-embedding-001` document/query embeddings
-- [x] Async retrieval-grounded generation
+- [x] Async grounded generation
 - [x] Numbered citation validation and provenance tracking
 - [x] Generation provider error and safety handling
+- [x] PostgreSQL + pgvector RAG storage
+- [x] `documents` and `document_chunks` tables
+- [x] Tenant-scoped document/chunk ownership
+- [x] Composite tenant/document foreign-key enforcement
+- [x] Document-to-chunk `ON DELETE CASCADE`
+- [x] `vector(768)` embedding storage
+- [x] Embedding fingerprint storage
+- [x] RAG schema integrity tests
+- [x] Alembic schema-drift verification with `alembic check`
 
-### Next
+---
+
+## Next
 
 - [ ] Upstream LLM timeout handling
 - [ ] Stale reservation cleanup after process failure
 - [ ] Security checks for PII, prompt injection, and leaked secrets
 - [ ] Observability: structured logs, metrics, and request tracing
 - [ ] Harden `/token` and `/tenants` development endpoints
-- [ ] Vector-store-backed retrieval
+- [ ] Exact cosine-similarity retrieval from pgvector
+- [ ] Tenant-scoped retrieval tests
 - [ ] End-to-end RAG pipeline integration
 - [ ] RAG workload hardening and evaluation
+- [ ] Benchmark exact search before adding HNSW
+- [ ] HNSW vector index using `vector_cosine_ops`
 - [ ] Caching layer
 - [ ] Distributed circuit breaker
 
-## RAG workload
+---
 
 ## RAG workload
 
@@ -234,55 +311,165 @@ Implemented so far:
 
 ```text
 PDF
- ↓
+  ↓
 Text Extraction
- ↓
+  ↓
 Page-Level Provenance
- ↓
+  ↓
 Deterministic Chunking
- ↓
+  ↓
 Gemini Embeddings
- ↓
+  ↓
+PostgreSQL + pgvector
+  ↓
+[Next: Retrieval]
+  ↓
+ContextPassage[]
+  ↓
 Grounded Generation
- ↓
+  ↓
 Validated Citations
+```
 
-The current RAG generation layer is intentionally independent of the vector store. It accepts retrieved context as a small provider-independent ContextPassage type and returns a structured GenerationResult containing the answer, validated citations, provenance of passages sent to the model, provider metadata, finish reason, and prompt version.
-The generation layer also:
+### Document storage
+
+Documents are tenant-owned:
+
+```text
+tenants
+  │
+  └── documents
+        │
+        └── document_chunks
+```
+
+A document uses a UUID as its database identity.
+
+A chunk has an internal integer primary key, while its logical identity is:
+
+```text
+(document_id, chunk_index)
+```
+
+The database additionally enforces the ownership relationship using:
+
+```text
+(tenant_id, document_id)
+        ↓
+documents(tenant_id, id)
+```
+
+This prevents a chunk belonging to one tenant from being attached to a document belonging to another tenant.
+
+The chunk table stores:
+
+- chunk text
+- page provenance
+- JSON metadata
+- `vector(768)` embedding
+- embedding fingerprint
+
+Document deletion cascades to its chunks.
+
+### Embeddings
+
+The current embedding model is:
+
+```text
+gemini-embedding-001
+```
+
+with:
+
+```text
+768 dimensions
+```
+
+Document and query embeddings use the provider's appropriate retrieval task configuration.
+
+The embedding layer also stores a configuration fingerprint so vector data can be associated with the embedding configuration that produced it.
+
+### Generation
+
+The current RAG generation layer is intentionally independent of the vector store. It accepts retrieved context through a small provider-independent `ContextPassage` type and returns a structured `GenerationResult` containing the answer, validated citations, provenance of passages sent to the model, provider metadata, finish reason, and prompt version.
+
+The generation layer:
+
 - uses the asynchronous Google GenAI API
 - refuses to call the LLM when no evidence is available
 - treats retrieved document content as untrusted data rather than instructions
 - validates citation markers against the passages actually supplied
 - records invalid citation markers separately
 - distinguishes expected safety blocks from provider failures
-The remaining RAG work is:
-      Embeddings
-          ↓
-      Vector Store
-          ↓
-      Retrieval
-          ↓
-      ContextPassage[]
-          ↓
-      Grounded Generation
-          ↓
-      Gateway Integration
 
-The vector-store choice is intentionally still undecided and will be evaluated based on persistence, tenant filtering, deployment simplicity, retrieval quality, and learning value.
+### Retrieval
+
+Retrieval is the next RAG implementation step.
+
+The planned retrieval path is:
+
+```text
+Query
+  ↓
+Query Embedding
+  ↓
+PostgreSQL + pgvector
+  ↓
+Tenant Filter
+  ↓
+Cosine Distance (<=>)
+  ↓
+Top-K Chunks
+  ↓
+ContextPassage[]
+```
+
+The first implementation will use exact nearest-neighbor search.
+
+The project will benchmark exact retrieval before adding approximate nearest-neighbor indexing. If an index is justified, the planned first option is HNSW using the cosine operator class:
+
+```text
+vector_cosine_ops
+```
+
+No HNSW index is currently required for the correctness-first implementation.
+
+---
 
 ## Scope
 
-This is a backend and system-design learning project, not an attempt to build a complete enterprise AI platform. The primary focus is everything around the LLM call — authentication, tenant isolation, rate limiting, guardrails, cost reservation, reliability, usage accounting, and settlement.
+This is a backend and system-design learning project, not an attempt to build a complete enterprise AI platform.
 
-PostgreSQL provides durable state and accounting. Redis provides fast, ephemeral state.
+The primary focus is everything around the LLM call:
 
-RAG, caching, additional providers behind a common interface, distributed rate limiting and breaker state, stale reservation recovery, PII/secret handling, prompt-injection detection, background processing, and advanced observability are extensions built only when they support the project's learning objectives. Features that are not necessary for demonstrating the gateway's core engineering concepts will remain future work rather than being added simply to make the project appear larger.
+- authentication
+- tenant isolation
+- rate limiting
+- guardrails
+- cost reservation
+- reliability
+- usage accounting
+- settlement
+- retrieval
+- grounded generation
+
+PostgreSQL provides durable state, accounting, document metadata, and vector storage.
+
+Redis provides fast, ephemeral state such as rate-limit counters.
+
+RAG, caching, additional providers behind a common interface, distributed rate limiting and breaker state, stale reservation recovery, PII/secret handling, prompt-injection detection, background processing, and advanced observability are extensions built only when they support the project's learning objectives.
+
+Features that are not necessary for demonstrating the gateway's core engineering concepts will remain future work rather than being added simply to make the project appear larger.
+
+---
 
 ## Stack
 
-**In use:** Python, FastAPI, PostgreSQL, SQLAlchemy, Alembic, Redis, JWT, Google Gemini, Google GenAI SDK, PyMuPDF, uv, pytest, Docker / Docker Compose
+**In use:** Python, FastAPI, PostgreSQL, pgvector, SQLAlchemy, Alembic, Redis, JWT, Google Gemini, Google GenAI SDK, PyMuPDF, uv, pytest, Docker / Docker Compose
 
-**Planned:** Vector store (decision pending), RAG retrieval pipeline, additional LLM provider, semantic caching, background processing
+**Planned:** RAG retrieval pipeline, additional LLM provider, semantic caching, background processing, advanced observability
+
+---
 
 ## Running locally
 
@@ -294,7 +481,9 @@ docker compose up --build
 
 This starts the API, PostgreSQL, and Redis, and runs database migrations automatically.
 
-API documentation: `http://127.0.0.1:8000/docs`
+API documentation:
+
+`http://127.0.0.1:8000/docs`
 
 The development `/token` endpoint can be used to obtain a JWT for local testing. It is development tooling and is not intended to represent a production authentication system.
 
@@ -330,6 +519,20 @@ uv run uvicorn app.main:app --reload
 uv run pytest tests -v
 ```
 
+For the full suite:
+
+```bash
+uv run pytest -q
+```
+
+To check for migration/model drift:
+
+```bash
+uv run alembic check
+```
+
+---
+
 ## Why this project?
 
 Calling an LLM API is the easy part.
@@ -344,7 +547,9 @@ The interesting engineering problems appear around it:
 - How do you isolate tenants?
 - How do you rate-limit requests?
 - How do you recover a reservation if a process crashes?
-- How do you eventually support RAG without losing control of cost and reliability?
+- How do you support RAG without losing control of cost and reliability?
+- How do you make vector retrieval tenant-safe?
 - How do you verify that a generated answer is actually supported by retrieved evidence?
+- When is approximate vector search worth the recall/complexity trade-off?
 
 This project is an attempt to build those systems, test them, understand their trade-offs, and document what is actually implemented rather than pretending unfinished infrastructure is production-ready.
