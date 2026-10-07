@@ -6,7 +6,13 @@ from sqlalchemy import pool
 from alembic import context
 from app.services.database import Base
 from app.core.config import settings
-from app.services.models import Tenant, User, UsageRecord  # noqa: F401 — import needed so Base knows about these models
+from app.services.models import (
+    Document,
+    DocumentChunkRecord,
+    Tenant,
+    UsageRecord,
+    User,
+)  # noqa: F401 — imports needed so Base knows about all models
 
 # this is the Alembic Config object, which provides
 # access to the values within the .ini file in use.

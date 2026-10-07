@@ -3,6 +3,114 @@ from decimal import Decimal
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from app.services.database import Base
 from sqlalchemy import ForeignKey, String, DateTime, Numeric, func
+import uuid
+from datetime import datetime
+
+from pgvector.sqlalchemy import Vector
+from sqlalchemy import (
+    ForeignKey,
+    ForeignKeyConstraint,
+    Integer,
+    Text,
+    UniqueConstraint,
+    func,
+)
+from sqlalchemy.dialects.postgresql import JSONB, UUID
+from sqlalchemy.orm import Mapped, mapped_column
+
+EMBEDDING_DIMS = 768
+
+
+class Document(Base):
+    __tablename__ = "documents"
+
+    __table_args__ = (
+        UniqueConstraint(
+            "tenant_id",
+            "id",
+            name="uq_documents_tenant_id_id",
+        ),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        primary_key=True,
+        default=uuid.uuid4,
+    )
+
+    tenant_id: Mapped[int] = mapped_column(
+        ForeignKey("tenants.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+
+    source: Mapped[str | None] = mapped_column(Text)
+
+    created_at: Mapped[datetime] = mapped_column(
+        server_default=func.now(),
+        nullable=False,
+    )
+
+
+class DocumentChunkRecord(Base):
+    __tablename__ = "document_chunks"
+
+    __table_args__ = (
+        UniqueConstraint(
+            "tenant_id",
+            "document_id",
+            "chunk_index",
+            name="uq_chunks_tenant_doc_idx",
+        ),
+        ForeignKeyConstraint(
+            ["tenant_id", "document_id"],
+            ["documents.tenant_id", "documents.id"],
+            ondelete="CASCADE",
+            name="fk_chunks_document_tenant",
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(
+        primary_key=True,
+        autoincrement=True,
+    )
+
+    tenant_id: Mapped[int] = mapped_column(
+        nullable=False,
+    )
+
+    document_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        nullable=False,
+    )
+
+    chunk_index: Mapped[int] = mapped_column(
+        Integer,
+        nullable=False,
+    )
+
+    page: Mapped[int | None] = mapped_column(Integer)
+
+    text: Mapped[str] = mapped_column(
+        Text,
+        nullable=False,
+    )
+
+    metadata_: Mapped[dict] = mapped_column(
+        "metadata",
+        JSONB,
+        nullable=False,
+        server_default="{}",
+    )
+
+    embedding = mapped_column(
+        Vector(EMBEDDING_DIMS),
+        nullable=False,
+    )
+
+    fingerprint: Mapped[str] = mapped_column(
+        Text,
+        nullable=False,
+    )
 
 
 class Tenant(Base):
