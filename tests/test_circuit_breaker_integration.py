@@ -1,16 +1,16 @@
 from fastapi.testclient import TestClient
 
-from app.main import app
 from app.api.dependencies import (
-    get_genai_client,
     enforce_guardrails,
+    get_genai_client,
 )
-from app.services.database import get_db
+from app.main import app
 from app.schemas.chat import ChatRequest
 from app.services.circuit_breaker import (
-    circuit_breaker,
     CircuitState,
+    circuit_breaker,
 )
+from app.services.database import get_db
 from app.services.models import Tenant, User
 
 
@@ -97,7 +97,7 @@ def test_circuit_breaker_full_lifecycle(db):
 
     db.add(tenant)
     db.flush()
-    
+
     initial_spend = tenant.current_spend
 
     user = User(
@@ -115,13 +115,14 @@ def test_circuit_breaker_full_lifecycle(db):
     circuit_breaker.state = CircuitState.CLOSED
     circuit_breaker.failure_count = 0
     circuit_breaker.opened_at = None
+    circuit_breaker._probe_in_flight = False
 
-    # Start fake Gemini in failure mode
+    # Start fake Gemini in failure mode.
     fake_client.aio.models.calls = 0
     fake_client.aio.models.should_fail = True
 
     # -----------------------------------------------------
-    # Override dependencies
+    # Dependency overrides
     # -----------------------------------------------------
 
     def override_test_db():
@@ -132,7 +133,6 @@ def test_circuit_breaker_full_lifecycle(db):
     app.dependency_overrides[get_db] = override_test_db
 
     try:
-
         with TestClient(app) as client:
 
             # -------------------------------------------------
@@ -152,7 +152,7 @@ def test_circuit_breaker_full_lifecycle(db):
             token = token_response.json()["access_token"]
 
             headers = {
-                "Authorization": f"Bearer {token}"
+                "Authorization": f"Bearer {token}",
             }
 
             payload = {
@@ -166,24 +166,24 @@ def test_circuit_breaker_full_lifecycle(db):
             # -------------------------------------------------
 
             for _ in range(5):
-
                 response = client.post(
                     "/api/v1/chat",
                     json=payload,
                     headers=headers,
                 )
-                
 
                 assert response.status_code == 502
-                
+
             db.refresh(tenant)
 
+            # Failed requests must not leave tenant spend charged.
             assert tenant.current_spend == initial_spend
 
-            # Five consecutive failures should open the circuit
+            # Five consecutive upstream failures should open
+            # the circuit.
             assert circuit_breaker.state == CircuitState.OPEN
 
-            # Gemini should have been called exactly five times
+            # Gemini should have been called exactly five times.
             assert fake_client.aio.models.calls == 5
 
             # -------------------------------------------------
@@ -198,20 +198,29 @@ def test_circuit_breaker_full_lifecycle(db):
 
             assert response.status_code == 503
 
-            # Gemini should NOT have been called again
+            # OPEN means the request should be rejected before
+            # the provider is called.
             assert fake_client.aio.models.calls == 5
 
             # -------------------------------------------------
-            # 3. Move past recovery timeout
+            # 3. Recovery timeout has elapsed
             # -------------------------------------------------
+
+            assert circuit_breaker.opened_at is not None
 
             circuit_breaker.opened_at -= 31
 
-            assert circuit_breaker.allow_request() is True
-            assert circuit_breaker.state == CircuitState.HALF_OPEN
+            # IMPORTANT:
+            # Do NOT call circuit_breaker.allow_request() here.
+            #
+            # The next /chat request itself must acquire the
+            # single HALF_OPEN recovery probe.
+
+            assert circuit_breaker.state == CircuitState.OPEN
+            assert circuit_breaker._probe_in_flight is False
 
             # -------------------------------------------------
-            # 4. Gemini recovers
+            # 4. Provider recovers
             # -------------------------------------------------
 
             fake_client.aio.models.should_fail = False
@@ -224,11 +233,17 @@ def test_circuit_breaker_full_lifecycle(db):
 
             assert response.status_code == 200
 
-            # Successful probe should close the circuit
+            # The successful HTTP request was the HALF_OPEN probe.
             assert circuit_breaker.state == CircuitState.CLOSED
 
-            # Failure counter should reset
+            # Successful recovery resets the failure counter.
             assert circuit_breaker.failure_count == 0
+
+            # Probe must no longer be marked as in flight.
+            assert circuit_breaker._probe_in_flight is False
+
+            # The successful request should have reached Gemini.
+            assert fake_client.aio.models.calls == 6
 
     finally:
 
@@ -237,3 +252,13 @@ def test_circuit_breaker_full_lifecycle(db):
         # -----------------------------------------------------
 
         app.dependency_overrides.clear()
+
+        # -----------------------------------------------------
+        # Reset global circuit breaker so this test does not
+        # contaminate other tests.
+        # -----------------------------------------------------
+
+        circuit_breaker.state = CircuitState.CLOSED
+        circuit_breaker.failure_count = 0
+        circuit_breaker.opened_at = None
+        circuit_breaker._probe_in_flight = False

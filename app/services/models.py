@@ -156,7 +156,6 @@ class UsageRecord(Base):
     request_id: Mapped[str] = mapped_column(
         String,
         nullable=False,
-        index=True,
     )
 
     operation: Mapped[str] = mapped_column(

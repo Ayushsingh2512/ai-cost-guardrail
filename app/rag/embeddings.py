@@ -3,8 +3,8 @@ from __future__ import annotations
 import hashlib
 import math
 import time
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass
-from typing import Callable, Sequence
 
 from google import genai
 from google.genai import types
@@ -16,7 +16,6 @@ DEFAULT_MODEL = "gemini-embedding-001"
 DEFAULT_DIMENSIONS = 768
 DEFAULT_BATCH_SIZE = 50
 DEFAULT_MAX_RETRIES = 3
-
 
 
 class EmbeddingError(Exception):
@@ -76,11 +75,27 @@ class GeminiEmbedder:
         sleep: Callable[[float], None] = time.sleep,
     ):
         self.config = config or EmbeddingConfig()
-        self.client = client or genai.Client()
+
+        # Keep provider-client creation lazy.
+        # This allows API requests that fail validation or authentication
+        # to complete without requiring a Gemini API key.
+        self._client = client
+
         self.sleep = sleep
 
         self._validate_config()
-        
+
+    @property
+    def client(self):
+        """
+        Lazily create the Gemini client only when an embedding request
+        actually needs it.
+        """
+        if self._client is None:
+            self._client = genai.Client()
+
+        return self._client
+
     @property
     def fingerprint(self) -> str:
         return self.config.fingerprint
@@ -139,9 +154,7 @@ class GeminiEmbedder:
         all_vectors: list[list[float]] = []
 
         for start in range(0, len(texts), self.config.batch_size):
-            batch = texts[
-                start : start + self.config.batch_size
-            ]
+            batch = texts[start : start + self.config.batch_size]
 
             vectors = self._embed_batch(
                 batch,
@@ -337,16 +350,16 @@ class GeminiEmbedder:
         config: EmbeddingConfig | None = None,
         *,
         sleep: Callable[[float], None] = time.sleep,
-    ) -> "GeminiEmbedder":
+    ) -> GeminiEmbedder:
         """
-        Build the real Gemini client using the environment-based
+        Build a Gemini embedder using the environment-based
         authentication handled by the Google GenAI SDK.
-        """
-        client = genai.Client()
 
+        The actual client remains lazy and is created only when
+        an embedding call is made.
+        """
         return cls(
             config=config,
-            client=client,
             sleep=sleep,
         )
 

@@ -141,6 +141,29 @@ async def chat(
             },
         )
 
+    except httpx.TimeoutException as e:
+        circuit_breaker.record_failure()
+
+        try:
+            usage_service.settle_failure(
+                db=db,
+                usage=usage,
+            )
+            db.commit()
+
+        except Exception:
+            db.rollback()
+
+            raise HTTPException(
+                status_code=500,
+                detail="LLM failed and usage settlement also failed",
+            )
+
+        raise HTTPException(
+            status_code=504,
+            detail="LLM provider request timed out",
+        )
+
     except Exception as e:
         circuit_breaker.record_failure()
 
@@ -197,11 +220,32 @@ async def chat(
             output_tokens=output_tokens,
             total_tokens=total_tokens,
         )
+
         db.commit()
+
         db.refresh(usage)
         db.refresh(tenant)
+
     except Exception:
+        # The original reservation was committed before the LLM call,
+        # so rolling back only this transaction does not release it.
         db.rollback()
+
+        # Start a new transaction and release the committed reservation.
+        try:
+            usage_service.settle_failure(
+                db=db,
+                usage=usage,
+            )
+
+            db.commit()
+
+        except Exception:
+            # Recovery itself failed. Roll back this attempt so the
+            # session is left usable. The original HTTP error is still
+            # returned below.
+            db.rollback()
+
         raise HTTPException(
             status_code=500,
             detail="LLM succeeded but usage settlement failed",

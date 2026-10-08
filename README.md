@@ -22,8 +22,11 @@ The goal is not to pretend this is a complete enterprise AI platform. The goal i
 - Reservation release when a request fails
 - Circuit breaker around the upstream LLM call
 - Fail-closed behavior when provider token counting is unavailable
+- Explicit upstream timeout handling with `504` responses
 - Auditable `usage_records` containing request ID, operation, token usage, reserved/actual cost, and status
+- Operation-aware usage accounting with separate `embed` and `generate` operations
 - Decimal-based monetary calculations backed by PostgreSQL `NUMERIC(12,6)`
+- Development-only token and tenant management endpoints
 
 ### RAG foundation
 
@@ -107,13 +110,13 @@ Actual Usage   Release Reservation
   │               │
   └───────┬───────┘
           ▼
-   Cost Settlement
+    Cost Settlement
           │
           ▼
-    Usage Record
+      Usage Record
           │
           ▼
-       Response
+        Response
 ```
 
 ### Concurrency model
@@ -131,14 +134,15 @@ Request A ─────┐
           Check budget
                │
                ▼
-            Reserve
+             Reserve
                │
                ▼
-            Commit
+             Commit
                │
                ▼
-         Release lock
+          Release lock
                │
+               ▼
 Request B ───────────────────► Lock tenant
                                 │
                                 ▼
@@ -172,12 +176,21 @@ Settlement rules:
 ```text
 actual < reserved  → refund difference
 actual > reserved  → charge shortfall
-request fails       → release reservation
+request fails      → release reservation
 ```
 
 For Gemini thinking models, the billable output usage includes visible output tokens and thinking tokens.
 
 Money is stored using PostgreSQL `NUMERIC(12,6)` and handled using Python `Decimal` rather than floating-point arithmetic.
+
+Upstream provider timeouts are mapped separately from generic provider failures:
+
+```text
+provider timeout  → 504
+other provider failure → 502
+```
+
+This keeps timeout semantics explicit at the API boundary instead of treating every provider failure as the same condition.
 
 ---
 
@@ -187,6 +200,7 @@ Money is stored using PostgreSQL `NUMERIC(12,6)` and handled using Python `Decim
 
 ```text
 UsageOperation
+
 ├── embed
 └── generate
 ```
@@ -199,7 +213,35 @@ The uniqueness boundary is:
 
 This allows a future RAG request to have one embedding operation and one generation operation under the same request ID without creating duplicate records for the same operation.
 
-The usage service also supports atomic batch reservation for multiple operations under one tenant budget check. The current implementation is designed so the combined reservation is checked before any part of the batch is persisted.
+The usage service also supports atomic batch reservation for multiple operations under one tenant budget check.
+
+However, the current RAG lifecycle intentionally does **not** use the batch reservation path because the generation cost cannot be known until retrieval has completed and the final generation prompt is available.
+
+The intended RAG accounting model is therefore sequential:
+
+```text
+Embed query
+    │
+    ▼
+Reserve embedding cost
+    │
+    ▼
+Retrieve context
+    │
+    ▼
+Determine final generation prompt size
+    │
+    ▼
+Reserve generation cost
+    │
+    ▼
+Generate response
+    │
+    ▼
+Settle embedding + generation
+```
+
+This avoids fabricating generation token estimates before the retrieved context is known.
 
 ---
 
@@ -223,6 +265,8 @@ HALF_OPEN
   └── failure ──► OPEN
 ```
 
+The circuit breaker includes a single recovery probe when entering `HALF_OPEN`, preventing multiple concurrent requests from independently probing the failing provider.
+
 The current circuit breaker is **per-process in-memory state**. A distributed breaker shared by multiple API instances is future work.
 
 ---
@@ -238,7 +282,8 @@ The current circuit breaker is **per-process in-memory state**. A distributed br
 | Redis/rate-limiter unavailable | 503 |
 | Circuit breaker open | 503 |
 | Provider token counting unavailable | 503 |
-| Upstream LLM failure | 502 |
+| Upstream LLM timeout | 504 |
+| Other upstream LLM failure | 502 |
 | RAG tenant not found | 404 |
 
 ---
@@ -332,6 +377,8 @@ Document and query embeddings use the provider's appropriate retrieval task conf
 The embedding layer also maintains a configuration fingerprint so stored vectors can be associated with the embedding configuration that produced them.
 
 Embedding pricing is represented separately in `CostEngine`, because embedding is a distinct billable operation from text generation.
+
+The embedding implementation currently returns vectors but does not yet propagate the real embedding token count through the full RAG accounting path. Completing RAG cost accounting will therefore require the embedder contract and corresponding tests to carry real embedding usage metadata.
 
 ### Chunking
 
@@ -457,6 +504,8 @@ Example shape:
 }
 ```
 
+`embedding_tokens` is part of the response contract, but complete RAG financial accounting is not considered finished until the real provider usage is propagated through the embedder, reservation, and settlement path.
+
 ---
 
 ## RAG service boundaries
@@ -509,9 +558,10 @@ Important integrity rules:
 
 ```text
 documents
+
     tenant_id + document_id
           ↓
-document_chunks
+   document_chunks
 ```
 
 and:
@@ -546,13 +596,37 @@ The current usage uniqueness boundary is:
 (request_id, operation)
 ```
 
-No additional usage migration is required for the current state.
+The standalone `request_id` index is intentionally not part of the current model because the usage uniqueness boundary is now defined by `(request_id, operation)`.
 
 Migration/model drift can be checked with:
 
 ```bash
 uv run alembic check
 ```
+
+The model and migration state are expected to remain aligned without reintroducing the removed standalone request ID index.
+
+---
+
+## Security and trust boundaries
+
+Authentication and tenant identity are derived from JWT claims rather than accepting tenant identity directly from normal request bodies.
+
+Tenant-owned document and chunk relationships are additionally enforced by PostgreSQL constraints.
+
+Retrieved RAG content is treated as untrusted document data rather than instructions to the model.
+
+Citation validation is performed against the actual retrieved passages supplied to generation.
+
+The current development token endpoint and tenant-creation endpoint are intentionally restricted to the development environment and are not mounted in production.
+
+The development tenant endpoint also validates:
+
+- tenant name length
+- positive monthly budget
+- decimal monetary representation
+
+These endpoints exist to make local development and testing easier. They are not intended to represent the project's final production identity or tenant-management system.
 
 ---
 
@@ -569,6 +643,7 @@ The gateway currently provides:
 - PostgreSQL usage auditing
 - Circuit breaker protection around LLM generation
 - Fail-closed provider token-counting behavior
+- Explicit timeout-to-`504` handling
 - PostgreSQL + pgvector RAG storage
 - Tenant-safe document/chunk ownership
 - Deterministic PDF chunking
@@ -579,14 +654,17 @@ The gateway currently provides:
 - RAG API guardrails
 - `POST /api/v1/rag/query`
 - Operation-aware usage accounting foundation
+- `(request_id, operation)` uniqueness boundary
 - Atomic batch budget reservation support
+- Development-only `/token` and `/tenants/` tooling
 - Automated unit, service, database, pipeline, and API tests
+- Alembic model/schema drift verification
 
 ### Test status
 
-**161 tests passing**
+**184 tests passing**
 
-The current total includes the newly added RAG API test suite.
+The suite currently covers the gateway, accounting, guardrails, circuit breaker, RAG pipeline, RAG API boundary, tenant-safe schema rules, development-only routes, and migration/model consistency checks.
 
 ---
 
@@ -612,7 +690,9 @@ The current total includes the newly added RAG API test suite.
 - [x] Failed-request reservation release
 - [x] `NUMERIC(12,6)` money storage with Python `Decimal`
 - [x] Circuit breaker: closed/open/half-open
+- [x] Single recovery probe protection in half-open state
 - [x] Circuit-breaker integration test coverage
+- [x] Explicit upstream timeout handling with `504`
 - [x] Docker Compose development stack
 - [x] Atomic Redis rate limiting using Lua
 - [x] PDF text extraction with page-level provenance
@@ -641,7 +721,12 @@ The current total includes the newly added RAG API test suite.
 - [x] `(request_id, operation)` uniqueness constraint
 - [x] Atomic batch budget reservation in `UsageService`
 - [x] RAG schema integrity tests
+- [x] Development-only `/token` route
+- [x] Development-only `/tenants/` route
+- [x] Development tenant input validation
+- [x] Development route production-isolation tests
 - [x] Alembic schema-drift verification with `alembic check`
+- [x] 184-test verification suite
 
 ---
 
@@ -649,21 +734,50 @@ The current total includes the newly added RAG API test suite.
 
 The next focus is to finish the **cost-controlled RAG request lifecycle** without inventing inaccurate token estimates.
 
+### RAG accounting
+
+- [ ] Propagate real embedding token usage through the embedder contract
 - [ ] RAG embedding budget reservation
 - [ ] Determine/measure generation prompt input tokens after retrieval
 - [ ] RAG generation budget reservation
 - [ ] RAG usage settlement for embedding + generation operations
+- [ ] Validate sequential reservation behavior under budget pressure
 - [ ] End-to-end RAG integration tests with real database boundaries and mocked providers
-- [ ] Upstream LLM timeout handling
+
+### Reliability
+
 - [ ] Stale reservation cleanup after process failure
-- [ ] Security checks for PII, prompt injection, and leaked secrets
-- [ ] Structured logs, metrics, and request tracing
-- [ ] Harden `/token` and `/tenants` development endpoints
-- [ ] RAG workload hardening and evaluation
-- [ ] Benchmark exact search before adding HNSW
-- [ ] HNSW vector index using `vector_cosine_ops`
+- [ ] Recovery strategy for interrupted reservations
+- [ ] RAG workload hardening and failure-path testing
+
+### Security
+
+- [ ] PII detection
+- [ ] Prompt-injection detection
+- [ ] Secret-leak checks
+- [ ] Harden production authentication and tenant management beyond development tooling
+
+### Observability
+
+- [ ] Structured logs
+- [ ] Metrics
+- [ ] Request tracing
+- [ ] RAG stage-level observability
+
+### RAG evaluation
+
+- [ ] Retrieval-quality evaluation
+- [ ] Grounding/evidence evaluation
+- [ ] Citation correctness evaluation
+- [ ] Latency and cost evaluation
+
+### Scale
+
+- [ ] Benchmark exact vector search before adding ANN indexing
+- [ ] Add HNSW with `vector_cosine_ops` only if benchmarking justifies it
 - [ ] Caching layer
 - [ ] Distributed circuit breaker
+- [ ] Distributed rate-limit architecture where required
 - [ ] Additional provider integration behind a common interface
 
 ---
@@ -672,6 +786,7 @@ The next focus is to finish the **cost-controlled RAG request lifecycle** withou
 
 ```text
 ai-cost-guardrail/
+
 ├── app/
 │   ├── api/
 │   │   ├── v1/
@@ -718,6 +833,7 @@ ai-cost-guardrail/
 │   ├── test_circuit_breaker.py
 │   ├── test_circuit_breaker_integration.py
 │   ├── test_cost_engine.py
+│   ├── test_dev_token.py
 │   ├── test_embeddings.py
 │   ├── test_generation.py
 │   ├── test_guardrail.py
@@ -774,13 +890,38 @@ ai-cost-guardrail/
 
 ## Running locally
 
-### Docker Compose
+### Prerequisites
+
+The project expects:
+
+- Python environment managed through `uv`
+- PostgreSQL with pgvector support
+- Redis
+- Gemini API credentials configured through environment variables
+
+### Start PostgreSQL and Redis
 
 ```bash
-docker compose up --build
+docker compose up -d postgres redis
 ```
 
-This starts the API, PostgreSQL, and Redis and applies the configured database migrations as part of the development stack.
+### Install dependencies
+
+```bash
+uv sync
+```
+
+### Apply migrations
+
+```bash
+uv run alembic upgrade head
+```
+
+### Start the API
+
+```bash
+uv run uvicorn app.main:app --reload
+```
 
 API documentation:
 
@@ -788,52 +929,107 @@ API documentation:
 http://127.0.0.1:8000/docs
 ```
 
-The development `/token` endpoint can be used to obtain a JWT for local testing. It is development tooling and is not intended to represent a production authentication system.
+### Development token
 
-### Local development
+The development `/token` endpoint can be used to obtain a JWT for local testing.
 
-Start dependencies:
+It is mounted only when the application environment is `development`.
 
-```bash
-docker compose up -d postgres redis
-```
+It is development tooling and is not intended to represent a production authentication system.
 
-Install/sync Python dependencies:
+### Development tenant creation
 
-```bash
-uv sync
-```
+The development `/tenants/` endpoint can be used for local tenant setup.
 
-Apply migrations:
+It is also mounted only in the `development` environment and validates the tenant name and positive monthly budget.
 
-```bash
-uv run alembic upgrade head
-```
+These routes are intentionally excluded from the production application's OpenAPI surface.
 
-Start the API:
+---
+
+## Docker Compose
+
+The development stack can be started with:
 
 ```bash
-uv run uvicorn app.main:app --reload
+docker compose up --build
 ```
 
-### Run tests
+This provides the application, PostgreSQL, and Redis development services according to the Compose configuration.
 
-Full suite:
+For application startup details and environment-specific configuration, use the repository's `.env.example` and Compose configuration.
+
+---
+
+## Health checks
+
+The API exposes health-related endpoints for development and service verification.
+
+The health boundary is intentionally kept separate from the core generation and RAG request paths.
+
+---
+
+## Verification commands
+
+### Full test suite
 
 ```bash
 uv run pytest -q
 ```
 
-Verbose:
+Expected current result:
+
+```text
+184 passed
+```
+
+### Verbose tests
 
 ```bash
 uv run pytest tests -v
 ```
 
-Migration/model drift check:
+### Development endpoint tests
+
+The development route isolation tests verify that:
+
+```text
+development:
+    /token
+    /tenants/
+
+production:
+    neither route is mounted
+```
+
+### Migration/model drift
 
 ```bash
 uv run alembic check
+```
+
+This verifies that the SQLAlchemy model metadata and Alembic migration state do not contain unexpected schema changes.
+
+The current usage model intentionally does not recreate a standalone `request_id` index because usage uniqueness is defined by:
+
+```text
+(request_id, operation)
+```
+
+### Docker migration check
+
+When using the Docker development environment:
+
+```bash
+docker compose exec api uv run alembic check
+```
+
+### Docker test suite
+
+When the test environment is available inside the container:
+
+```bash
+docker compose exec api uv run pytest -q
 ```
 
 ---
@@ -844,11 +1040,11 @@ The test suite is intentionally split by layer instead of relying only on large 
 
 ```text
 Unit tests
-  ↓
+    ↓
 Service / pipeline tests
-  ↓
+    ↓
 Database integrity tests
-  ↓
+    ↓
 API boundary tests
 ```
 
@@ -862,6 +1058,9 @@ Examples:
 - `test_rag_api.py` validates HTTP authentication, guardrails, tenant handling, request validation, and response mapping.
 - `test_rag_schema.py` validates database-level tenant ownership and cascade integrity.
 - `test_rag_schemas.py` validates the external RAG request/response contract.
+- `test_dev_token.py` validates development-only route mounting and production isolation.
+- Circuit-breaker integration tests validate failure transitions and upstream protection.
+- Chat API tests validate explicit timeout-to-`504` behavior.
 
 The objective is to make correctness boundaries explicit and keep unfinished infrastructure from being hidden behind a single happy-path integration test.
 
@@ -904,11 +1103,13 @@ The interesting engineering problems appear around it:
 - How do you prevent concurrent requests from overspending?
 - How do you account for actual token usage?
 - What happens when the provider fails?
+- What happens when the provider times out?
 - How do you stop repeatedly sending traffic to a failing provider?
 - How do you isolate tenants?
 - How do you rate-limit requests?
 - How do you recover a reservation if a process crashes?
 - How do you support RAG without losing control of cost and reliability?
+- How do you reserve RAG cost when the final generation prompt is unknown before retrieval?
 - How do you make vector retrieval tenant-safe?
 - How do you verify that a generated answer is supported by retrieved evidence?
 - When is approximate vector search worth the recall/complexity trade-off?
@@ -917,8 +1118,78 @@ This project is an attempt to build those systems, test them, understand their t
 
 ---
 
+## Engineering principles
+
+### Measure before adding infrastructure
+
+Exact pgvector search is being benchmarked before adding HNSW.
+
+Caching, distributed state, and additional infrastructure should be justified by measured workload requirements rather than added for appearance.
+
+### Never fabricate usage data
+
+The system should prefer real provider usage metadata or explicit provider token-counting APIs over guessed token counts.
+
+This is especially important for RAG because retrieval changes the final generation prompt.
+
+### Keep domain layers independent
+
+RAG ingestion, chunking, embedding, retrieval, orchestration, and generation are kept separate from HTTP, authentication, tenant lookup, rate limiting, and financial accounting.
+
+This keeps each layer testable and makes future integrations easier.
+
+### Prefer durable correctness for financial state
+
+Tenant budgets and usage records are persisted in PostgreSQL.
+
+Concurrent budget reservation uses database row locking so the correctness of financial state does not depend on a single API process.
+
+Money is represented with `Decimal` and PostgreSQL `NUMERIC(12,6)`.
+
+### Security boundaries should be explicit
+
+Development convenience endpoints should not silently become production write surfaces.
+
+Tenant isolation should be enforced both at the application boundary and through database relationships where possible.
+
+RAG evidence should be treated as untrusted input rather than model instructions.
+
+---
+
+## Current project direction
+
+The project is currently moving from a substantially complete **LLM gateway foundation** toward a **cost-controlled RAG gateway**.
+
+The main engineering problem for the next phase is not simply generating an answer from retrieved documents. It is integrating the RAG workload into the same durable accounting model already used by the normal chat path.
+
+The intended lifecycle is:
+
+```text
+1. Authenticate
+2. Apply guardrails
+3. Embed query
+4. Reserve embedding cost
+5. Retrieve tenant-safe evidence
+6. Build final generation prompt
+7. Count final generation input tokens
+8. Reserve generation cost
+9. Generate through circuit breaker
+10. Read actual usage
+11. Settle embedding + generation usage
+12. Persist auditable usage records
+13. Return grounded response
+```
+
+The critical design constraint is that the embedding and generation reservations are **sequential**, not one upfront batch, because the generation cost depends on the retrieved context.
+
+The project will continue to prioritize correctness, explicit boundaries, measurable trade-offs, and honest documentation of what is implemented versus what remains future work.
+
+---
+
 ## Status at the end of today's session
 
-**161 tests passing.**
+**184 tests passing.**
 
-Today's work added the first RAG API boundary and its dedicated API test suite. The next session starts with **RAG cost/budget accounting**, especially how to reserve and settle embedding and generation operations without relying on fabricated token estimates.
+The project now has the gateway accounting foundation, timeout handling, development-route isolation, operation-aware usage records, tenant-safe pgvector RAG storage, deterministic ingestion/chunking, exact retrieval, grounded generation, citation validation, and the `/api/v1/rag/query` API boundary.
+
+The next major milestone is **RAG cost/budget accounting**, especially propagating real embedding usage and reserving/settling embedding and generation operations without relying on fabricated token estimates.

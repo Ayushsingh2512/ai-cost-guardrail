@@ -1,36 +1,38 @@
 from fastapi import FastAPI
-from dotenv import load_dotenv
 
 from app.api.v1 import chat, health, rag, tenants
-
+from app.core.config import Settings, settings
 from app.core.security import create_access_token
 
 
+def create_app(app_settings: Settings) -> FastAPI:
+    app = FastAPI(title=app_settings.app_name)
 
-load_dotenv()
+    app.include_router(chat.router)
+    app.include_router(health.router)
+    app.include_router(rag.router)
 
-app = FastAPI(title="AI Cost Guardrail")
+    @app.get("/")
+    def home():
+        return {"message": "AI Cost Guardrail is running"}
 
-app.include_router(chat.router)
-app.include_router(health.router)
-app.include_router(tenants.router)
-app.include_router(rag.router)
+    if app_settings.environment == "development":
+        app.include_router(tenants.router)
+
+        @app.post("/token")
+        def generate_test_token(
+            tenant_id: str,
+            user_id: str,
+        ):
+            return {
+                "access_token": create_access_token(
+                    tenant_id=tenant_id,
+                    user_id=user_id,
+                ),
+                "token_type": "bearer",
+            }
+
+    return app
 
 
-@app.get("/")
-def home():
-    return {"message": "AI Cost Guardrail is running"}
-
-
-@app.post("/token")
-def generate_test_token(
-    tenant_id: str,
-    user_id: str,
-):
-    return {
-        "access_token": create_access_token(
-            tenant_id=tenant_id,
-            user_id=user_id,
-        ),
-        "token_type": "bearer",
-    }
+app = create_app(settings)

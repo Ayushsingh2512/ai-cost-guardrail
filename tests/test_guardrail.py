@@ -1,6 +1,6 @@
 import pytest
 import redis
-from app.services.database import SessionLocal
+from app.core.model_registry import MODEL_REGISTRY
 from app.services.redis_client import get_redis_client
 from app.services.guardrail import GuardrailService, RateLimitExceeded
 
@@ -128,6 +128,57 @@ def test_rate_limit_isolated_between_tenants():
             tenant_id=1004,
             limit=1,
             window_seconds=60,
+        )
+        
+def test_model_policy_allows_gemini_2_5_flash():
+    service = GuardrailService()
+
+    service.check_model_policy("gemini-2.5-flash")
+    
+def test_model_policy_allows_every_registered_model():
+    service = GuardrailService()
+
+    for model in MODEL_REGISTRY:
+        service.check_model_policy(model)
+        
+def test_model_policy_rejects_model_not_in_registry(monkeypatch):
+    service = GuardrailService()
+
+    monkeypatch.setitem(
+        MODEL_REGISTRY,
+        "temporary-model",
+        MODEL_REGISTRY["gemini-3-flash-preview"],
+    )
+
+    service.check_model_policy("temporary-model")
+    
+def test_model_policy_uses_registry_output_limit(monkeypatch):
+    service = GuardrailService()
+
+    original = MODEL_REGISTRY["gemini-2.5-flash"]
+
+    from app.core.model_registry import ModelConfig
+
+    monkeypatch.setitem(
+        MODEL_REGISTRY,
+        "gemini-2.5-flash",
+        ModelConfig(
+            name="gemini-2.5-flash",
+            input_per_1m=original.input_per_1m,
+            output_per_1m=original.output_per_1m,
+            max_output_tokens=1000,
+        ),
+    )
+
+    service.check_token_limit(
+        max_tokens=1000,
+        model="gemini-2.5-flash",
+    )
+
+    with pytest.raises(ValueError):
+        service.check_token_limit(
+            max_tokens=1001,
+            model="gemini-2.5-flash",
         )
 
    

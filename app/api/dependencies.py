@@ -53,39 +53,39 @@ def get_current_user(
 
 def _check_guardrails(
     *,
-    current_user: dict,
+    current_user,
     redis_client,
-    model: str,
-    max_tokens: int,
-) -> None:
+    model,
+    max_tokens,
+):
     try:
-        guardrail_service.check_token_limit(max_tokens)
-
         guardrail_service.check_model_policy(model)
-
+        guardrail_service.check_token_limit(
+            max_tokens=max_tokens,
+            model=model,
+        )
         guardrail_service.check_rate_limit(
             redis_client,
             int(current_user["tenant_id"]),
         )
 
-    except RateLimitExceeded as e:
+    except RateLimitExceeded as exc:
         raise HTTPException(
             status_code=429,
-            detail=str(e),
-        )
+            detail=str(exc),
+        ) from exc
 
-    except RuntimeError as e:
+    except RuntimeError as exc:
         raise HTTPException(
             status_code=503,
-            detail=str(e),
-        )
+            detail=str(exc),
+        ) from exc
 
-    except ValueError as e:
+    except ValueError as exc:
         raise HTTPException(
             status_code=400,
-            detail=str(e),
-        )
-
+            detail=str(exc),
+        ) from exc
 
 def enforce_guardrails(
     request: ChatRequest,
