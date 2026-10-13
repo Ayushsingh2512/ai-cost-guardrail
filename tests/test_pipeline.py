@@ -10,7 +10,6 @@ from app.rag.generation import (
 )
 from app.rag.pipeline import RAGService
 
-
 FINGERPRINT = "fake/fake-embedding/8"
 
 
@@ -180,7 +179,7 @@ async def test_pipeline_calls_collaborators_in_order():
 
 @pytest.mark.asyncio
 async def test_pipeline_passes_embedding_vector_tenant_and_fingerprint():
-    service, embedder, retriever, _ = build_service()
+    service, _, retriever, _ = build_service()
 
     await service.answer(
         tenant_id=42,
@@ -374,8 +373,7 @@ async def test_pipeline_returns_retrieved_refs_and_timings():
     }
 
     assert all(
-        isinstance(value, int) and value >= 0
-        for value in result.timings_ms.values()
+        isinstance(value, int) and value >= 0 for value in result.timings_ms.values()
     )
 
     assert result.embedding_tokens is None

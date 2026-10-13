@@ -13,6 +13,8 @@ def test_estimate_reservation():
     )
 
     assert result == Decimal("0.00325")
+
+
 def test_estimate_embedding_cost():
     result = cost_engine.estimate_embedding_cost(
         model="gemini-embedding-001",
@@ -28,7 +30,7 @@ def test_estimate_embedding_cost_zero_tokens():
         input_tokens=0,
     )
 
-    assert result == Decimal("0")
+    assert result == Decimal(0)
 
 
 def test_estimate_embedding_cost_unknown_model():
@@ -49,6 +51,7 @@ def test_calculate_embedding_cost():
     )
 
     assert result == Decimal("0.000300")
+
 
 def test_reservation_accounts_for_large_input():
     result = cost_engine.estimate_reservation(
@@ -95,7 +98,7 @@ def test_zero_tokens_cost_nothing():
         output_tokens=0,
     )
 
-    assert result == Decimal("0")
+    assert result == Decimal(0)
 
 
 def test_unknown_model_is_rejected():
@@ -105,8 +108,6 @@ def test_unknown_model_is_rejected():
             input_tokens=500,
             max_output_tokens=1000,
         )
-        
-from decimal import Decimal
 
 
 def test_estimate_reservation_quantizes_to_six_decimal_places():
@@ -145,7 +146,8 @@ def test_calculate_embedding_cost_quantizes_to_six_decimal_places():
     # Six-decimal precision rounds this to $0.000000.
     assert result == Decimal("0.000000")
     assert result.as_tuple().exponent == -6
-    
+
+
 def test_estimate_reservation_supports_gemini_2_5_flash():
     result = cost_engine.estimate_reservation(
         model="gemini-2.5-flash",

@@ -3,6 +3,7 @@ from types import SimpleNamespace
 import pytest
 
 from app.rag.generation import (
+    PROMPT_VERSION,
     ContextPassage,
     GenerationConfig,
     GenerationInputError,
@@ -10,7 +11,6 @@ from app.rag.generation import (
     GenerationRateLimitError,
     GenerationService,
     GenerationTimeoutError,
-    PROMPT_VERSION,
 )
 
 
@@ -101,9 +101,7 @@ def passages():
 
 @pytest.mark.asyncio
 async def test_generate_returns_grounded_answer(passages):
-    response = make_response(
-        text="Refunds are available within 30 days [1]."
-    )
+    response = make_response(text="Refunds are available within 30 days [1].")
 
     client = FakeClient(response=response)
 
@@ -121,9 +119,7 @@ async def test_generate_returns_grounded_answer(passages):
     )
 
     assert result.status == "answered"
-    assert result.answer == (
-        "Refunds are available within 30 days [1]."
-    )
+    assert result.answer == ("Refunds are available within 30 days [1].")
     assert result.passages_sent == [
         ("doc-1", 3),
         ("doc-1", 4),
@@ -188,9 +184,7 @@ async def test_generate_deduplicates_valid_citations(passages):
         "The same refund period is confirmed [1]."
     )
 
-    service = GenerationService(
-        client=FakeClient(response=response)
-    )
+    service = GenerationService(client=FakeClient(response=response))
 
     result = await service.generate(
         query="What is the refund policy?",
@@ -207,35 +201,25 @@ async def test_generate_deduplicates_valid_citations(passages):
 @pytest.mark.asyncio
 async def test_generate_drops_invalid_citations(passages):
     response = make_response(
-        text="Answer [1]. "
-        "Unknown source [99]. "
-        "Invalid source [0]."
+        text="Answer [1]. Unknown source [99]. Invalid source [0]."
     )
 
-    service = GenerationService(
-        client=FakeClient(response=response)
-    )
+    service = GenerationService(client=FakeClient(response=response))
 
     result = await service.generate(
         query="Question?",
         passages=passages,
     )
 
-    assert [citation.ref for citation in result.citations] == [
-        ("doc-1", 3)
-    ]
+    assert [citation.ref for citation in result.citations] == [("doc-1", 3)]
     assert result.invalid_citation_markers == 2
 
 
 @pytest.mark.asyncio
 async def test_generate_empty_context_short_circuits():
-    client = FakeClient(
-        response=make_response()
-    )
+    client = FakeClient(response=make_response())
 
-    service = GenerationService(
-        client=client
-    )
+    service = GenerationService(client=client)
 
     result = await service.generate(
         query="What is the answer?",
@@ -262,9 +246,7 @@ async def test_generate_maps_safety_block_to_result():
 
     client = FakeClient(response=response)
 
-    service = GenerationService(
-        client=client
-    )
+    service = GenerationService(client=client)
 
     result = await service.generate(
         query="Question?",
@@ -290,15 +272,11 @@ async def test_generate_maps_prompt_block_to_result():
         finish_reason="OTHER",
     )
 
-    response.prompt_feedback = SimpleNamespace(
-        block_reason="SAFETY"
-    )
+    response.prompt_feedback = SimpleNamespace(block_reason="SAFETY")
 
     client = FakeClient(response=response)
 
-    service = GenerationService(
-        client=client
-    )
+    service = GenerationService(client=client)
 
     result = await service.generate(
         query="Question?",
@@ -322,9 +300,7 @@ async def test_generate_maps_max_tokens_to_length(passages):
         finish_reason="MAX_TOKENS",
     )
 
-    service = GenerationService(
-        client=FakeClient(response=response)
-    )
+    service = GenerationService(client=FakeClient(response=response))
 
     result = await service.generate(
         query="Question?",
@@ -344,9 +320,7 @@ async def test_generate_raises_rate_limit_error(passages):
         )
     )
 
-    service = GenerationService(
-        client=client
-    )
+    service = GenerationService(client=client)
 
     with pytest.raises(GenerationRateLimitError):
         await service.generate(
@@ -364,9 +338,7 @@ async def test_generate_raises_provider_error_for_5xx(passages):
         )
     )
 
-    service = GenerationService(
-        client=client
-    )
+    service = GenerationService(client=client)
 
     with pytest.raises(GenerationProviderError):
         await service.generate(
@@ -377,13 +349,9 @@ async def test_generate_raises_provider_error_for_5xx(passages):
 
 @pytest.mark.asyncio
 async def test_generate_raises_timeout_error(passages):
-    client = FakeClient(
-        error=TimeoutError("timed out")
-    )
+    client = FakeClient(error=TimeoutError("timed out"))
 
-    service = GenerationService(
-        client=client
-    )
+    service = GenerationService(client=client)
 
     with pytest.raises(GenerationTimeoutError):
         await service.generate(
@@ -396,13 +364,9 @@ async def test_generate_raises_timeout_error(passages):
 async def test_generate_raises_provider_error_for_connection_failure(
     passages,
 ):
-    client = FakeClient(
-        error=ConnectionError("connection failed")
-    )
+    client = FakeClient(error=ConnectionError("connection failed"))
 
-    service = GenerationService(
-        client=client
-    )
+    service = GenerationService(client=client)
 
     with pytest.raises(GenerationProviderError):
         await service.generate(
@@ -413,9 +377,7 @@ async def test_generate_raises_provider_error_for_connection_failure(
 
 @pytest.mark.asyncio
 async def test_generate_rejects_empty_query(passages):
-    service = GenerationService(
-        client=FakeClient(response=make_response())
-    )
+    service = GenerationService(client=FakeClient(response=make_response()))
 
     with pytest.raises(GenerationInputError):
         await service.generate(
@@ -426,9 +388,7 @@ async def test_generate_rejects_empty_query(passages):
 
 @pytest.mark.asyncio
 async def test_generate_rejects_empty_passage_text():
-    service = GenerationService(
-        client=FakeClient(response=make_response())
-    )
+    service = GenerationService(client=FakeClient(response=make_response()))
 
     passages = [
         ContextPassage(
@@ -446,22 +406,17 @@ async def test_generate_rejects_empty_passage_text():
 
 def test_generation_config_rejects_invalid_temperature():
     with pytest.raises(ValueError):
-        GenerationConfig(
-            temperature=-0.1
-        )
+        GenerationConfig(temperature=-0.1)
 
     with pytest.raises(ValueError):
-        GenerationConfig(
-            temperature=2.1
-        )
+        GenerationConfig(temperature=2.1)
 
 
 def test_generation_config_rejects_empty_model():
     with pytest.raises(ValueError):
-        GenerationConfig(
-            model="   "
-        )
-        
+        GenerationConfig(model="   ")
+
+
 def test_generation_config_defaults_max_output_tokens():
     config = GenerationConfig()
 

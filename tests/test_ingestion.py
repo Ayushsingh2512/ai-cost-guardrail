@@ -93,10 +93,7 @@ def test_document_id_is_preserved(tmp_path):
         document_id="employee-handbook-123",
     )
 
-    assert all(
-        page.document_id == "employee-handbook-123"
-        for page in pages
-    )
+    assert all(page.document_id == "employee-handbook-123" for page in pages)
 
 
 def test_metadata_is_preserved_on_every_page(tmp_path):
@@ -215,7 +212,6 @@ def test_non_pdf_file_is_rejected(tmp_path):
             text_file,
             document_id="doc-1",
         )
-
 
 
 def test_page_with_no_text_returns_empty_text(tmp_path):

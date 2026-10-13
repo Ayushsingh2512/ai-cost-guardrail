@@ -147,10 +147,7 @@ def test_document_id_is_preserved_for_every_chunk():
         overlap=40,
     )
 
-    assert all(
-        chunk.document_id == "employee-handbook-001"
-        for chunk in chunks
-    )
+    assert all(chunk.document_id == "employee-handbook-001" for chunk in chunks)
 
 
 def test_chunks_do_not_exceed_configured_size():

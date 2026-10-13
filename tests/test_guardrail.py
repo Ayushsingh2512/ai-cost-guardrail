@@ -1,18 +1,22 @@
 import pytest
 import redis
+
 from app.core.model_registry import MODEL_REGISTRY
-from app.services.redis_client import get_redis_client
 from app.services.guardrail import GuardrailService, RateLimitExceeded
+from app.services.redis_client import get_redis_client
+
 
 def test_token_limit_rejects_over_2000():
     service = GuardrailService()
     with pytest.raises(ValueError):
         service.check_token_limit(5000)
-        
+
+
 def test_token_limit_allows_under_2000():
     service = GuardrailService()
     service.check_token_limit(500)
-    
+
+
 def test_model_policy_rejects_disallowed_model():
     service = GuardrailService()
     with pytest.raises(ValueError):
@@ -22,15 +26,17 @@ def test_model_policy_rejects_disallowed_model():
 def test_model_policy_allows_valid_model():
     service = GuardrailService()
     service.check_model_policy("gemini-3-flash-preview")  # should not raise
-    
+
+
 def test_rate_limit_rejects_after_limit():
     service = GuardrailService()
     client = get_redis_client()
     client.delete("ratelimit:999")
     service.check_rate_limit(client, tenant_id=999, limit=1)
     with pytest.raises(RateLimitExceeded):
-        service.check_rate_limit(client, tenant_id=999, limit = 1)
-        
+        service.check_rate_limit(client, tenant_id=999, limit=1)
+
+
 def test_rate_limit_allows_requests_up_to_limit():
     service = GuardrailService()
     client = get_redis_client()
@@ -74,6 +80,8 @@ def test_rate_limit_sets_expiration_without_refreshing_window():
     second_ttl = client.ttl(key)
 
     assert 0 < second_ttl <= first_ttl
+
+
 def test_rate_limit_fails_when_redis_is_unavailable():
     service = GuardrailService()
 
@@ -91,6 +99,7 @@ def test_rate_limit_fails_when_redis_is_unavailable():
             limit=30,
             window_seconds=60,
         )
+
 
 def test_rate_limit_isolated_between_tenants():
     service = GuardrailService()
@@ -129,18 +138,21 @@ def test_rate_limit_isolated_between_tenants():
             limit=1,
             window_seconds=60,
         )
-        
+
+
 def test_model_policy_allows_gemini_2_5_flash():
     service = GuardrailService()
 
     service.check_model_policy("gemini-2.5-flash")
-    
+
+
 def test_model_policy_allows_every_registered_model():
     service = GuardrailService()
 
     for model in MODEL_REGISTRY:
         service.check_model_policy(model)
-        
+
+
 def test_model_policy_rejects_model_not_in_registry(monkeypatch):
     service = GuardrailService()
 
@@ -151,7 +163,8 @@ def test_model_policy_rejects_model_not_in_registry(monkeypatch):
     )
 
     service.check_model_policy("temporary-model")
-    
+
+
 def test_model_policy_uses_registry_output_limit(monkeypatch):
     service = GuardrailService()
 
@@ -180,5 +193,3 @@ def test_model_policy_uses_registry_output_limit(monkeypatch):
             max_tokens=1001,
             model="gemini-2.5-flash",
         )
-
-   

@@ -4,7 +4,7 @@ from uuid import uuid4
 import pytest
 from sqlalchemy.exc import IntegrityError
 
-from app.services.models import Tenant, User, UsageRecord
+from app.services.models import Tenant, UsageRecord, User
 
 
 def create_test_tenant_and_user(db):

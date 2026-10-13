@@ -8,7 +8,6 @@ from app.services.models import (
     Tenant,
 )
 
-
 EMBEDDING_DIMS = EmbeddingConfig().dimensions
 TEST_FINGERPRINT = "test/gemini-embedding-001/768"
 

@@ -13,7 +13,6 @@ from app.services.circuit_breaker import (
 from app.services.database import get_db
 from app.services.models import Tenant, User
 
-
 # ---------------------------------------------------------
 # Fake Gemini client
 # ---------------------------------------------------------
@@ -134,7 +133,6 @@ def test_circuit_breaker_full_lifecycle(db):
 
     try:
         with TestClient(app) as client:
-
             # -------------------------------------------------
             # Get JWT for our isolated test user
             # -------------------------------------------------
@@ -246,7 +244,6 @@ def test_circuit_breaker_full_lifecycle(db):
             assert fake_client.aio.models.calls == 6
 
     finally:
-
         # -----------------------------------------------------
         # Always clean up dependency overrides
         # -----------------------------------------------------

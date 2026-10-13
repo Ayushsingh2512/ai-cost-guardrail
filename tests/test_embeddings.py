@@ -67,17 +67,9 @@ class StubClient:
             if step is not None:
                 raise step
 
-        output_contents = (
-            list(contents)[:-1]
-            if self.wrong_count
-            else list(contents)
-        )
+        output_contents = list(contents)[:-1] if self.wrong_count else list(contents)
 
-        dimensions = (
-            self.dims + 1
-            if self.wrong_dims
-            else self.dims
-        )
+        dimensions = self.dims + 1 if self.wrong_dims else self.dims
 
         vectors = []
 
@@ -85,17 +77,10 @@ class StubClient:
             number = float(text[1:])
 
             vectors.append(
-                SimpleNamespace(
-                    values=[
-                        number + 1.0
-                    ]
-                    + [1.0] * (dimensions - 1)
-                )
+                SimpleNamespace(values=[number + 1.0] + [1.0] * (dimensions - 1))
             )
 
-        return SimpleNamespace(
-            embeddings=vectors
-        )
+        return SimpleNamespace(embeddings=vectors)
 
 
 def make(client, **config):
@@ -140,18 +125,12 @@ def test_order_preserved_across_batches():
 
 
 def test_vectors_are_unit_length_with_configured_dimensions():
-    vectors = make(
-        StubClient()
-    ).embed_documents(
-        ["t1", "t2", "t3"]
-    )
+    vectors = make(StubClient()).embed_documents(["t1", "t2", "t3"])
 
     for vector in vectors:
         assert len(vector) == 2
 
-        magnitude = math.sqrt(
-            sum(value * value for value in vector)
-        )
+        magnitude = math.sqrt(sum(value * value for value in vector))
 
         assert magnitude == pytest.approx(1.0)
 
@@ -164,15 +143,9 @@ def test_task_types_differ_for_documents_and_queries():
     embedder.embed_documents(["t1"])
     embedder.embed_query("t1")
 
-    assert (
-        client.calls[0].config.task_type
-        == "RETRIEVAL_DOCUMENT"
-    )
+    assert client.calls[0].config.task_type == "RETRIEVAL_DOCUMENT"
 
-    assert (
-        client.calls[1].config.task_type
-        == "RETRIEVAL_QUERY"
-    )
+    assert client.calls[1].config.task_type == "RETRIEVAL_QUERY"
 
 
 def test_empty_list_returns_empty_without_api_call():
@@ -194,33 +167,23 @@ def test_empty_text_rejected_before_any_api_call(bad):
     client = StubClient()
 
     with pytest.raises(EmbeddingInputError):
-        make(client).embed_documents(
-            ["t1", bad]
-        )
+        make(client).embed_documents(["t1", bad])
 
     assert client.calls == []
 
 
 def test_count_mismatch_raises():
-    client = StubClient(
-        wrong_count=True
-    )
+    client = StubClient(wrong_count=True)
 
     with pytest.raises(EmbeddingProviderError):
-        make(client).embed_documents(
-            ["t1", "t2"]
-        )
+        make(client).embed_documents(["t1", "t2"])
 
 
 def test_wrong_dimension_from_provider_raises():
-    client = StubClient(
-        wrong_dims=True
-    )
+    client = StubClient(wrong_dims=True)
 
     with pytest.raises(EmbeddingProviderError):
-        make(client).embed_documents(
-            ["t1"]
-        )
+        make(client).embed_documents(["t1"])
 
 
 def test_429_is_retried_then_succeeds():
@@ -232,9 +195,7 @@ def test_429_is_retried_then_succeeds():
         ]
     )
 
-    vectors = make(
-        client
-    ).embed_documents(["t1"])
+    vectors = make(client).embed_documents(["t1"])
 
     assert len(vectors) == 1
     assert len(client.calls) == 3
@@ -314,37 +275,20 @@ def test_embed_chunks_pairs_chunks_with_vectors_and_fingerprint():
         for i in range(3)
     ]
 
-    embedder = make(
-        StubClient()
-    )
+    embedder = make(StubClient())
 
     output = embed_chunks(
         embedder,
         chunks,
     )
 
-    assert [
-        item.chunk
-        for item in output
-    ] == chunks
+    assert [item.chunk for item in output] == chunks
 
-    assert all(
-        isinstance(item, EmbeddedChunk)
-        for item in output
-    )
+    assert all(isinstance(item, EmbeddedChunk) for item in output)
 
-    assert {
-        item.fingerprint
-        for item in output
-    } == {
-        "gemini/gemini-embedding-001/2"
-    }
+    assert {item.fingerprint for item in output} == {"gemini/gemini-embedding-001/2"}
 
-    assert (
-        output[2].embedding[0]
-        / output[2].embedding[1]
-        == pytest.approx(3)
-    )
+    assert output[2].embedding[0] / output[2].embedding[1] == pytest.approx(3)
 
 
 def test_embed_chunks_empty():
@@ -364,19 +308,13 @@ def test_embed_chunks_empty():
 def test_fake_embedder_is_deterministic_and_normalized():
     fake = FakeEmbedder()
 
-    first = fake.embed_documents(
-        ["hello"]
-    )[0]
+    first = fake.embed_documents(["hello"])[0]
 
-    second = fake.embed_documents(
-        ["hello"]
-    )[0]
+    second = fake.embed_documents(["hello"])[0]
 
     assert first == second
     assert len(first) == fake.dimensions
 
-    magnitude = math.sqrt(
-        sum(value * value for value in first)
-    )
+    magnitude = math.sqrt(sum(value * value for value in first))
 
     assert magnitude == pytest.approx(1.0)

@@ -10,7 +10,6 @@ from app.services.database import get_db
 from app.services.guardrail import RateLimitExceeded
 from app.services.models import Tenant, User
 
-
 client = TestClient(app)
 
 
@@ -80,15 +79,18 @@ def test_rag_rejects_token_without_user_id():
 
 
 def test_rag_returns_400_when_token_limit_guardrail_rejects():
-    with patch(
-        "app.api.dependencies.verify_access_token",
-        return_value={
-            "tenant_id": "1",
-            "user_id": "1",
-        },
-    ), patch(
-        "app.api.dependencies.guardrail_service.check_token_limit",
-        side_effect=ValueError("Token limit exceeded"),
+    with (
+        patch(
+            "app.api.dependencies.verify_access_token",
+            return_value={
+                "tenant_id": "1",
+                "user_id": "1",
+            },
+        ),
+        patch(
+            "app.api.dependencies.guardrail_service.check_token_limit",
+            side_effect=ValueError("Token limit exceeded"),
+        ),
     ):
         response = client.post(
             "/api/v1/rag/query",
@@ -117,15 +119,18 @@ def test_rag_returns_429_when_rate_limit_exceeded():
     ):
         raise RateLimitExceeded("Rate limit exceeded")
 
-    with patch(
-        "app.api.dependencies.verify_access_token",
-        return_value={
-            "tenant_id": "1",
-            "user_id": "1",
-        },
-    ), patch(
-        "app.api.dependencies.guardrail_service.check_rate_limit",
-        side_effect=fake_rate_limit,
+    with (
+        patch(
+            "app.api.dependencies.verify_access_token",
+            return_value={
+                "tenant_id": "1",
+                "user_id": "1",
+            },
+        ),
+        patch(
+            "app.api.dependencies.guardrail_service.check_rate_limit",
+            side_effect=fake_rate_limit,
+        ),
     ):
         app.dependency_overrides[get_redis_client] = fake_redis
 
@@ -158,15 +163,18 @@ def test_rag_returns_503_when_rate_limiter_unavailable():
     ):
         raise RuntimeError("Rate limiting service is unavailable")
 
-    with patch(
-        "app.api.dependencies.verify_access_token",
-        return_value={
-            "tenant_id": "1",
-            "user_id": "1",
-        },
-    ), patch(
-        "app.api.dependencies.guardrail_service.check_rate_limit",
-        side_effect=fake_rate_limit,
+    with (
+        patch(
+            "app.api.dependencies.verify_access_token",
+            return_value={
+                "tenant_id": "1",
+                "user_id": "1",
+            },
+        ),
+        patch(
+            "app.api.dependencies.guardrail_service.check_rate_limit",
+            side_effect=fake_rate_limit,
+        ),
     ):
         app.dependency_overrides[get_redis_client] = fake_redis
 

@@ -1,23 +1,18 @@
+import threading
 from decimal import Decimal
 from uuid import uuid4
 
 import pytest
-
-from app.services.models import Tenant, UsageRecord, User
-from app.services.usage import (
-    BudgetReservation,
-    UsageService,
-)
-
-import threading
-
 from sqlalchemy import create_engine
 from sqlalchemy.orm import Session
 
 from app.core.config import settings
-from app.services.models import Tenant, User, UsageRecord
-
-from app.services.usage import usage_service
+from app.services.models import Tenant, UsageRecord, User
+from app.services.usage import (
+    BudgetReservation,
+    UsageService,
+    usage_service,
+)
 
 
 def create_test_tenant_and_user(db):
@@ -61,7 +56,7 @@ def test_reserve_budget(db):
     assert usage.operation == "generate"
     assert usage.status == "reserved"
     assert usage.reserved_cost == reserved_cost
-    assert usage.actual_cost == Decimal("0")
+    assert usage.actual_cost == Decimal(0)
 
     db.refresh(tenant)
 
@@ -88,7 +83,7 @@ def test_reservation_rejected_when_budget_exceeded(db):
 
     db.refresh(tenant)
 
-    assert Decimal(str(tenant.current_spend)) == Decimal("0")
+    assert Decimal(str(tenant.current_spend)) == Decimal(0)
 
 
 def test_successful_settlement_refunds_unused_reservation(db):
@@ -156,10 +151,10 @@ def test_failed_request_releases_reservation(db):
     db.refresh(tenant)
     db.refresh(usage)
 
-    assert Decimal(str(tenant.current_spend)) == Decimal("0")
+    assert Decimal(str(tenant.current_spend)) == Decimal(0)
 
     assert usage.status == "failed"
-    assert usage.actual_cost == Decimal("0")
+    assert usage.actual_cost == Decimal(0)
 
 
 def test_successful_settlement_increases_spend_when_actual_cost_exceeds_reservation(
@@ -284,9 +279,7 @@ def test_reserve_budget_batch_rejects_combined_budget_exceeded(db):
     assert Decimal(str(tenant.current_spend)) == Decimal("0.00")
 
     usage_records = (
-        db.query(UsageRecord)
-        .filter(UsageRecord.request_id == request_id)
-        .all()
+        db.query(UsageRecord).filter(UsageRecord.request_id == request_id).all()
     )
 
     assert usage_records == []
@@ -325,7 +318,8 @@ def test_reserve_budget_batch_rejects_duplicate_operation(db):
     db.refresh(tenant)
 
     assert Decimal(str(tenant.current_spend)) == Decimal("0.00")
-    
+
+
 def test_reserve_budget_prevents_concurrent_overspend():
     engine = create_engine(settings.database_url)
 
@@ -446,9 +440,7 @@ def test_reserve_budget_prevents_concurrent_overspend():
 
         try:
             persisted_tenant = (
-                verify_db.query(Tenant)
-                .filter(Tenant.id == tenant_id)
-                .one()
+                verify_db.query(Tenant).filter(Tenant.id == tenant_id).one()
             )
 
             usage_records = (
@@ -472,13 +464,13 @@ def test_reserve_budget_prevents_concurrent_overspend():
                 UsageRecord.tenant_id == tenant_id
             ).delete(synchronize_session=False)
 
-            cleanup_db.query(User).filter(
-                User.id == user_id
-            ).delete(synchronize_session=False)
+            cleanup_db.query(User).filter(User.id == user_id).delete(
+                synchronize_session=False
+            )
 
-            cleanup_db.query(Tenant).filter(
-                Tenant.id == tenant_id
-            ).delete(synchronize_session=False)
+            cleanup_db.query(Tenant).filter(Tenant.id == tenant_id).delete(
+                synchronize_session=False
+            )
 
             cleanup_db.commit()
 

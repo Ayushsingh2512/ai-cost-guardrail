@@ -4,10 +4,10 @@ from sqlalchemy.exc import IntegrityError
 
 from app.rag.embeddings import EmbeddingConfig
 from app.services.models import (
+    EMBEDDING_DIMS,
     Document,
     DocumentChunkRecord,
     Tenant,
-    EMBEDDING_DIMS,
 )
 
 
