@@ -5,17 +5,17 @@ Revises: 086da34b695d
 Create Date: <KEEP_GENERATED_DATE>
 """
 
-from typing import Sequence, Union
+from collections.abc import Sequence
 
-from alembic import op
 import sqlalchemy as sa
 
+from alembic import op
 
 # revision identifiers, used by Alembic.
 revision: str = "a593c7273588"
-down_revision: Union[str, Sequence[str], None] = "086da34b695d"
-branch_labels: Union[str, Sequence[str], None] = None
-depends_on: Union[str, Sequence[str], None] = None
+down_revision: str | Sequence[str] | None = "086da34b695d"
+branch_labels: str | Sequence[str] | None = None
+depends_on: str | Sequence[str] | None = None
 
 
 def upgrade() -> None:
@@ -32,9 +32,7 @@ def upgrade() -> None:
 
     # Existing usage records were created by /chat, so they represent
     # generation operations.
-    op.execute(
-        "UPDATE usage_records SET operation = 'generate'"
-    )
+    op.execute("UPDATE usage_records SET operation = 'generate'")
 
     # Enforce the new invariant for all future rows.
     op.alter_column(

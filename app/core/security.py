@@ -1,9 +1,8 @@
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 import jwt
 
 from app.core.config import settings
-
 
 ALGORITHM = "HS256"
 TOKEN_EXPIRE_MINUTES = 60
@@ -12,9 +11,7 @@ TOKEN_EXPIRE_MINUTES = 60
 def create_access_token(tenant_id: str, user_id: str) -> str:
     """Create a JWT containing tenant and user identity."""
 
-    expire = datetime.now(timezone.utc) + timedelta(
-        minutes=TOKEN_EXPIRE_MINUTES
-    )
+    expire = datetime.now(UTC) + timedelta(minutes=TOKEN_EXPIRE_MINUTES)
 
     payload = {
         "tenant_id": tenant_id,

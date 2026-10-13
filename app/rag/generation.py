@@ -2,15 +2,15 @@ from __future__ import annotations
 
 import re
 import time
+from collections.abc import Sequence
 from dataclasses import dataclass
-from typing import Literal, Sequence
+from typing import Literal
 
 import httpx
 from google import genai
 from google.genai import types
 
 from app.core.config import settings
-
 
 PROMPT_VERSION = "rag-grounded-v1"
 
@@ -138,14 +138,11 @@ class GenerationConfig:
             raise ValueError("model cannot be empty")
 
         if not 0.0 <= self.temperature <= 2.0:
-            raise ValueError(
-                "temperature must be between 0.0 and 2.0"
-            )
+            raise ValueError("temperature must be between 0.0 and 2.0")
 
         if self.max_output_tokens <= 0:
-            raise ValueError(
-                "max_output_tokens must be greater than zero"
-            )
+            raise ValueError("max_output_tokens must be greater than zero")
+
 
 class GenerationService:
     """
@@ -188,6 +185,7 @@ class GenerationService:
             )
 
         return self._client
+
     async def generate(
         self,
         query: str,
@@ -241,9 +239,7 @@ class GenerationService:
         except Exception as exc:
             raise self._map_provider_exception(exc) from exc
 
-        latency_ms = int(
-            (time.monotonic() - started_at) * 1000
-        )
+        latency_ms = int((time.monotonic() - started_at) * 1000)
 
         finish_reason = self._extract_finish_reason(response)
 
@@ -273,9 +269,7 @@ class GenerationService:
             answer = None
 
         if not isinstance(answer, str) or not answer.strip():
-            raise GenerationProviderError(
-                "Generation provider returned no text answer"
-            )
+            raise GenerationProviderError("Generation provider returned no text answer")
 
         citations, invalid_count = self._parse_citations(
             answer=answer,
@@ -306,21 +300,11 @@ class GenerationService:
         evidence_blocks: list[str] = []
 
         for index, passage in enumerate(passages, start=1):
-            evidence_blocks.append(
-                f"[{index}]\n"
-                f"{passage.text.strip()}"
-            )
+            evidence_blocks.append(f"[{index}]\n{passage.text.strip()}")
 
         evidence = "\n\n".join(evidence_blocks)
 
-        return (
-            "EVIDENCE\n"
-            "=======\n"
-            f"{evidence}\n\n"
-            "QUESTION\n"
-            "========\n"
-            f"{query.strip()}"
-        )
+        return f"EVIDENCE\n=======\n{evidence}\n\nQUESTION\n========\n{query.strip()}"
 
     def _parse_citations(
         self,
@@ -419,11 +403,14 @@ class GenerationService:
     def _extract_finish_reason(
         response,
     ) -> FinishReason:
-        candidates = getattr(
-            response,
-            "candidates",
-            None,
-        ) or []
+        candidates = (
+            getattr(
+                response,
+                "candidates",
+                None,
+            )
+            or []
+        )
 
         candidate = candidates[0] if candidates else None
 
@@ -516,9 +503,7 @@ class GenerationService:
                 httpx.TimeoutException,
             ),
         ):
-            return GenerationTimeoutError(
-                "Generation provider request timed out"
-            )
+            return GenerationTimeoutError("Generation provider request timed out")
 
         if isinstance(code, int) and 500 <= code < 600:
             return GenerationProviderError(
@@ -532,25 +517,17 @@ class GenerationService:
                 httpx.RequestError,
             ),
         ):
-            return GenerationProviderError(
-                "Generation provider request failed"
-            )
+            return GenerationProviderError("Generation provider request failed")
 
-        return GenerationProviderError(
-            "Generation provider request failed"
-        )
+        return GenerationProviderError("Generation provider request failed")
 
     @staticmethod
     def _validate_query(query: str) -> None:
         if not isinstance(query, str):
-            raise GenerationInputError(
-                "Query must be a string"
-            )
+            raise GenerationInputError("Query must be a string")
 
         if not query.strip():
-            raise GenerationInputError(
-                "Query cannot be empty"
-            )
+            raise GenerationInputError("Query cannot be empty")
 
     @staticmethod
     def _validate_passages(
@@ -568,24 +545,16 @@ class GenerationService:
             document_id, chunk_index = passage.ref
 
             if not isinstance(document_id, str) or not document_id.strip():
-                raise GenerationInputError(
-                    "Passage document_id cannot be empty"
-                )
+                raise GenerationInputError("Passage document_id cannot be empty")
 
             if not isinstance(chunk_index, int) or chunk_index < 0:
-                raise GenerationInputError(
-                    "Passage chunk_index cannot be negative"
-                )
+                raise GenerationInputError("Passage chunk_index cannot be negative")
 
             if not isinstance(passage.text, str):
-                raise GenerationInputError(
-                    "Passage text must be a string"
-                )
+                raise GenerationInputError("Passage text must be a string")
 
             if not passage.text.strip():
-                raise GenerationInputError(
-                    "Passage text cannot be empty"
-                )
+                raise GenerationInputError("Passage text cannot be empty")
 
 
 generation_service = GenerationService(

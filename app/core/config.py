@@ -1,21 +1,24 @@
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+
 class Settings(BaseSettings):
     app_name: str = "AI Cost Guardrail"
     environment: str = "development"
-    
+
     gemini_api_key: str
     redis_url: str = "redis://localhost:6379"
     jwt_secret: str
-    database_url: str = "postgresql+psycopg://postgres:postgres@localhost:5432/ai_guardrail"
-    
+    database_url: str = (
+        "postgresql+psycopg://postgres:postgres@localhost:5432/ai_guardrail"
+    )
 
     generation_model: str = "gemini-3-flash-preview"
     generation_temperature: float = 0.0
     model_config = SettingsConfigDict(
         env_file=".env",
         env_file_encoding="utf-8",
-        case_sensitive=False,   
+        case_sensitive=False,
     )
-settings = Settings()
-    
+
+
+settings = Settings()  # type: ignore[call-arg]

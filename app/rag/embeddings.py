@@ -11,7 +11,6 @@ from google.genai import types
 
 from app.rag.chunking import DocumentChunk
 
-
 DEFAULT_MODEL = "gemini-embedding-001"
 DEFAULT_DIMENSIONS = 768
 DEFAULT_BATCH_SIZE = 50
@@ -193,10 +192,7 @@ class GeminiEmbedder:
                         f"{len(texts)} inputs"
                     )
 
-                return [
-                    self._normalize_and_validate(vector)
-                    for vector in vectors
-                ]
+                return [self._normalize_and_validate(vector) for vector in vectors]
 
             except EmbeddingProviderError:
                 raise
@@ -209,8 +205,7 @@ class GeminiEmbedder:
                 if self._is_rate_limit(code):
                     if attempt >= self.config.max_retries:
                         raise EmbeddingRateLimitError(
-                            "Embedding provider rate limit "
-                            "persisted after retries"
+                            "Embedding provider rate limit persisted after retries"
                         ) from exc
 
                     self._sleep_before_retry(attempt)
@@ -219,8 +214,7 @@ class GeminiEmbedder:
                 if self._is_retryable(code, exc):
                     if attempt >= self.config.max_retries:
                         raise EmbeddingProviderError(
-                            "Embedding provider failed "
-                            "after retries"
+                            "Embedding provider failed after retries"
                         ) from exc
 
                     self._sleep_before_retry(attempt)
@@ -230,17 +224,13 @@ class GeminiEmbedder:
                     "Embedding provider request failed"
                 ) from exc
 
-        raise EmbeddingProviderError(
-            "Embedding provider failed"
-        ) from last_error
+        raise EmbeddingProviderError("Embedding provider failed") from last_error
 
     def _extract_vectors(self, response) -> list[list[float]]:
         embeddings = getattr(response, "embeddings", None)
 
         if embeddings is None:
-            raise EmbeddingProviderError(
-                "Embedding provider returned no embeddings"
-            )
+            raise EmbeddingProviderError("Embedding provider returned no embeddings")
 
         vectors: list[list[float]] = []
 
@@ -249,8 +239,7 @@ class GeminiEmbedder:
 
             if values is None:
                 raise EmbeddingProviderError(
-                    "Embedding provider returned an embedding "
-                    "without vector values"
+                    "Embedding provider returned an embedding without vector values"
                 )
 
             vectors.append(list(values))
@@ -275,19 +264,12 @@ class GeminiEmbedder:
                 "Embedding provider returned a non-finite vector"
             )
 
-        magnitude = math.sqrt(
-            sum(value * value for value in values)
-        )
+        magnitude = math.sqrt(sum(value * value for value in values))
 
         if magnitude == 0:
-            raise EmbeddingProviderError(
-                "Embedding provider returned a zero vector"
-            )
+            raise EmbeddingProviderError("Embedding provider returned a zero vector")
 
-        return [
-            value / magnitude
-            for value in values
-        ]
+        return [value / magnitude for value in values]
 
     def _validate_texts(
         self,
@@ -301,14 +283,10 @@ class GeminiEmbedder:
         text: str,
     ) -> None:
         if not isinstance(text, str):
-            raise EmbeddingInputError(
-                "Embedding input must be a string"
-            )
+            raise EmbeddingInputError("Embedding input must be a string")
 
         if not text.strip():
-            raise EmbeddingInputError(
-                "Embedding input cannot be empty"
-            )
+            raise EmbeddingInputError("Embedding input cannot be empty")
 
     def _is_rate_limit(
         self,
@@ -380,9 +358,7 @@ class FakeEmbedder:
         model: str = "fake-embedding",
     ):
         if dimensions <= 0:
-            raise ValueError(
-                "dimensions must be greater than zero"
-            )
+            raise ValueError("dimensions must be greater than zero")
 
         self.dimensions = dimensions
         self.model = model
@@ -395,10 +371,7 @@ class FakeEmbedder:
         self,
         texts: Sequence[str],
     ) -> list[list[float]]:
-        return [
-            self._embed_text(text)
-            for text in texts
-        ]
+        return [self._embed_text(text) for text in texts]
 
     def embed_query(
         self,
@@ -411,13 +384,9 @@ class FakeEmbedder:
         text: str,
     ) -> list[float]:
         if not isinstance(text, str) or not text.strip():
-            raise EmbeddingInputError(
-                "Embedding input cannot be empty"
-            )
+            raise EmbeddingInputError("Embedding input cannot be empty")
 
-        digest = hashlib.sha256(
-            text.encode("utf-8")
-        ).digest()
+        digest = hashlib.sha256(text.encode("utf-8")).digest()
 
         raw: list[float] = []
 
@@ -425,18 +394,13 @@ class FakeEmbedder:
             byte = digest[i % len(digest)]
             raw.append((byte / 255.0) * 2.0 - 1.0)
 
-        magnitude = math.sqrt(
-            sum(value * value for value in raw)
-        )
+        magnitude = math.sqrt(sum(value * value for value in raw))
 
         if magnitude == 0:
             raw[0] = 1.0
             magnitude = 1.0
 
-        return [
-            value / magnitude
-            for value in raw
-        ]
+        return [value / magnitude for value in raw]
 
 
 def embed_chunks(
@@ -458,8 +422,7 @@ def embed_chunks(
 
     if len(vectors) != len(chunks):
         raise EmbeddingProviderError(
-            "Number of embeddings does not match "
-            "number of chunks"
+            "Number of embeddings does not match number of chunks"
         )
 
     fingerprint = embedder.fingerprint

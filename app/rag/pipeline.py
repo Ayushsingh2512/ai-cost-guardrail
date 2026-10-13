@@ -8,7 +8,6 @@ from typing import Protocol
 
 from app.rag.generation import ContextPassage, GenerationResult
 
-
 MAX_QUERY_LENGTH = 4000
 MIN_TOP_K = 1
 MAX_TOP_K = 20
@@ -16,11 +15,9 @@ MAX_TOP_K = 20
 
 class Embedder(Protocol):
     @property
-    def fingerprint(self) -> str:
-        ...
+    def fingerprint(self) -> str: ...
 
-    def embed_query(self, query: str) -> list[float]:
-        ...
+    def embed_query(self, query: str) -> list[float]: ...
 
 
 class Retriever(Protocol):
@@ -32,8 +29,7 @@ class Retriever(Protocol):
         k: int,
         fingerprint: str,
         max_distance: float | None = None,
-    ) -> list[ContextPassage]:
-        ...
+    ) -> list[ContextPassage]: ...
 
 
 class Generator(Protocol):
@@ -41,8 +37,7 @@ class Generator(Protocol):
         self,
         query: str,
         passages: Sequence[ContextPassage],
-    ) -> GenerationResult:
-        ...
+    ) -> GenerationResult: ...
 
 
 @dataclass(frozen=True)
@@ -112,22 +107,18 @@ class RAGService:
     @staticmethod
     def _validate_query(query: str) -> None:
         if not isinstance(query, str):
-            raise ValueError("query must be a string")
+            raise TypeError("query must be a string")
 
         if not query.strip():
             raise ValueError("query cannot be empty")
 
         if len(query) > MAX_QUERY_LENGTH:
-            raise ValueError(
-                f"query cannot exceed {MAX_QUERY_LENGTH} characters"
-            )
+            raise ValueError(f"query cannot exceed {MAX_QUERY_LENGTH} characters")
 
     @staticmethod
     def _validate_top_k(top_k: int) -> None:
         if not isinstance(top_k, int):
-            raise ValueError("top_k must be an integer")
+            raise TypeError("top_k must be an integer")
 
         if not MIN_TOP_K <= top_k <= MAX_TOP_K:
-            raise ValueError(
-                f"top_k must be between {MIN_TOP_K} and {MAX_TOP_K}"
-            )
+            raise ValueError(f"top_k must be between {MIN_TOP_K} and {MAX_TOP_K}")

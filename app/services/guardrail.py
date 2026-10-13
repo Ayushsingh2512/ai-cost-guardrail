@@ -21,9 +21,7 @@ class GuardrailService:
         with existing direct unit tests.
         """
         if max_tokens < 0:
-            raise ValueError(
-                f"max_tokens ({max_tokens}) cannot be negative"
-            )
+            raise ValueError(f"max_tokens ({max_tokens}) cannot be negative")
 
         if model is None:
             allowed_limit = 2000
@@ -44,7 +42,7 @@ class GuardrailService:
                 f"of {allowed_limit} for model '{model}'"
                 if model is not None
                 else f"max_tokens ({max_tokens}) exceeds "
-                     f"allowed limit of {allowed_limit}"
+                f"allowed limit of {allowed_limit}"
             )
 
     def check_model_policy(self, model: str) -> None:
@@ -82,14 +80,11 @@ class GuardrailService:
             )
 
         except redis.exceptions.RedisError as exc:
-            raise RuntimeError(
-                "Rate limiting service is unavailable"
-            ) from exc
+            raise RuntimeError("Rate limiting service is unavailable") from exc
 
         if current_count > limit:
             raise RateLimitExceeded(
-                f"Rate limit exceeded: "
-                f"{limit} requests per {window_seconds}s"
+                f"Rate limit exceeded: {limit} requests per {window_seconds}s"
             )
 
 

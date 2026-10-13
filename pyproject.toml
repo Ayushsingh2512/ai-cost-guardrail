@@ -88,3 +88,6 @@ dev = [
     "pyright>=1.1.413",
     "ruff>=0.16.2",
 ]
+
+[tool.ruff.lint]
+ignore = ["B008", "BLE001"]

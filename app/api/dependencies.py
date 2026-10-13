@@ -8,7 +8,6 @@ from app.schemas.rag import RAGRequest
 from app.services.guardrail import RateLimitExceeded, guardrail_service
 from app.services.redis_client import get_redis_client
 
-
 security = HTTPBearer()
 
 RAG_MODEL = "gemini-3-flash-preview"
@@ -86,6 +85,7 @@ def _check_guardrails(
             status_code=400,
             detail=str(exc),
         ) from exc
+
 
 def enforce_guardrails(
     request: ChatRequest,

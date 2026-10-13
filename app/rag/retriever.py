@@ -36,9 +36,7 @@ class Retriever:
         if max_distance is not None and max_distance < 0:
             raise ValueError("max_distance must not be negative")
 
-        distance = DocumentChunkRecord.embedding.cosine_distance(
-            list(vector)
-        )
+        distance = DocumentChunkRecord.embedding.cosine_distance(list(vector))
 
         statement = (
             select(DocumentChunkRecord)

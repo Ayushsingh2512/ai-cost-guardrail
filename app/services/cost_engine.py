@@ -1,4 +1,5 @@
-from decimal import Decimal, ROUND_HALF_UP
+from decimal import ROUND_HALF_UP, Decimal
+from typing import ClassVar
 
 from app.core.model_registry import MODEL_REGISTRY
 
@@ -6,7 +7,7 @@ from app.core.model_registry import MODEL_REGISTRY
 class CostEngine:
     MONEY_QUANTUM = Decimal("0.000001")
 
-    EMBEDDING_PRICING = {
+    EMBEDDING_PRICING: ClassVar[dict[str, dict[str, Decimal]]] = {
         "gemini-embedding-001": {
             "input_per_1m": Decimal("0.15"),
         },
@@ -22,16 +23,10 @@ class CostEngine:
 
         pricing = self._get_pricing(model)
 
-        input_cost = (
-            Decimal(input_tokens)
-            / Decimal("1000000")
-            * pricing.input_per_1m
-        )
+        input_cost = Decimal(input_tokens) / Decimal(1000000) * pricing.input_per_1m
 
         output_cost = (
-            Decimal(max_output_tokens)
-            / Decimal("1000000")
-            * pricing.output_per_1m
+            Decimal(max_output_tokens) / Decimal(1000000) * pricing.output_per_1m
         )
 
         return self._quantize_cost(input_cost + output_cost)
@@ -47,20 +42,12 @@ class CostEngine:
 
         pricing = self._get_pricing(model)
 
-        input_cost = (
-            Decimal(input_tokens)
-            / Decimal("1000000")
-            * pricing.input_per_1m
-        )
+        input_cost = Decimal(input_tokens) / Decimal(1000000) * pricing.input_per_1m
 
-        billable_output_tokens = (
-            thinking_tokens + output_tokens
-        )
+        billable_output_tokens = thinking_tokens + output_tokens
 
         output_cost = (
-            Decimal(billable_output_tokens)
-            / Decimal("1000000")
-            * pricing.output_per_1m
+            Decimal(billable_output_tokens) / Decimal(1000000) * pricing.output_per_1m
         )
 
         return self._quantize_cost(input_cost + output_cost)
@@ -74,11 +61,7 @@ class CostEngine:
 
         pricing = self._get_embedding_pricing(model)
 
-        raw_cost = (
-            Decimal(input_tokens)
-            / Decimal("1000000")
-            * pricing["input_per_1m"]
-        )
+        raw_cost = Decimal(input_tokens) / Decimal(1000000) * pricing["input_per_1m"]
 
         return self._quantize_cost(raw_cost)
 
@@ -118,8 +101,7 @@ class CostEngine:
             return self.EMBEDDING_PRICING[model]
         except KeyError as exc:
             raise ValueError(
-                "No embedding pricing configuration exists "
-                f"for model '{model}'"
+                f"No embedding pricing configuration exists for model '{model}'"
             ) from exc
 
 

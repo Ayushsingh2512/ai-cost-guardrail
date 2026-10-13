@@ -3,13 +3,12 @@ from sqlalchemy.orm import Session
 
 from app.api.dependencies import enforce_rag_guardrails, get_current_user
 from app.rag.embeddings import GeminiEmbedder
-from app.rag.generation import GenerationService, generation_service
+from app.rag.generation import generation_service
 from app.rag.pipeline import RAGService
 from app.rag.retriever import Retriever
-from app.schemas.rag import RAGRequest, RAGResponse
+from app.schemas.rag import RAGCitation, RAGRequest, RAGResponse
 from app.services.database import get_db
 from app.services.models import Tenant
-
 
 router = APIRouter(
     prefix="/api/v1",
@@ -42,11 +41,7 @@ async def rag_query(
 ):
     tenant_id = int(current_user["tenant_id"])
 
-    tenant = (
-        db.query(Tenant)
-        .filter(Tenant.id == tenant_id)
-        .first()
-    )
+    tenant = db.query(Tenant).filter(Tenant.id == tenant_id).first()
 
     if tenant is None:
         raise HTTPException(
@@ -71,11 +66,11 @@ async def rag_query(
         status=result.generation.status,
         answer=result.generation.answer,
         citations=[
-            {
-                "ref": citation.ref,
-                "source": citation.source,
-                "page": citation.page,
-            }
+            RAGCitation(
+                ref=citation.ref,
+                source=citation.source,
+                page=citation.page,
+            )
             for citation in result.generation.citations
         ],
         top_k=request.top_k,

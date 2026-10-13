@@ -1,7 +1,7 @@
 from dataclasses import dataclass, field
 from pathlib import Path
 
-import fitz
+import fitz  # type: ignore[import-untyped]
 
 
 @dataclass(frozen=True)

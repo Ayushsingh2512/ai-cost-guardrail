@@ -6,19 +6,19 @@ Create Date: 2026-10-07 09:41:29.774224
 
 """
 
-from typing import Sequence, Union
+from collections.abc import Sequence
 
 import pgvector.sqlalchemy
 import sqlalchemy as sa
-from alembic import op
 from sqlalchemy.dialects import postgresql
 
+from alembic import op
 
 # revision identifiers, used by Alembic.
 revision: str = "086da34b695d"
-down_revision: Union[str, Sequence[str], None] = "3f4fef3dda06"
-branch_labels: Union[str, Sequence[str], None] = None
-depends_on: Union[str, Sequence[str], None] = None
+down_revision: str | Sequence[str] | None = "3f4fef3dda06"
+branch_labels: str | Sequence[str] | None = None
+depends_on: str | Sequence[str] | None = None
 
 
 def upgrade() -> None:
@@ -60,7 +60,6 @@ def upgrade() -> None:
             name="uq_documents_tenant_id_id",
         ),
     )
-
 
     op.create_table(
         "document_chunks",
@@ -130,7 +129,7 @@ def upgrade() -> None:
 def downgrade() -> None:
     """Downgrade schema."""
     op.drop_table("document_chunks")
-   
+
     op.drop_table("documents")
 
     # Leave the extension installed intentionally.

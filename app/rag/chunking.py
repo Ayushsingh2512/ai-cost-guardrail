@@ -1,13 +1,12 @@
 import re
 from dataclasses import dataclass, field
 
-
 _SENTENCE_PATTERN = re.compile(r"(?<=[.!?])\s+")
 
 _SEPARATORS = (
     "\n\n",  # paragraph
-    "\n",    # line
-    " ",     # word
+    "\n",  # line
+    " ",  # word
 )
 
 
@@ -87,10 +86,7 @@ def _split_text(text: str, max_length: int, separator_index: int = 0) -> list[st
         return result
 
     # Final fallback: hard character split.
-    return [
-        text[i : i + max_length]
-        for i in range(0, len(text), max_length)
-    ]
+    return [text[i : i + max_length] for i in range(0, len(text), max_length)]
 
 
 def _word_safe_tail(text: str, overlap: int) -> str:
@@ -173,9 +169,7 @@ def chunk_text(
     # If chunk_size is too small to leave room for a body,
     # fail explicitly rather than producing broken chunks.
     if body_limit <= 0:
-        raise ValueError(
-            "chunk_size must be large enough for the requested overlap"
-        )
+        raise ValueError("chunk_size must be large enough for the requested overlap")
 
     atoms = _split_text(
         normalized_text,
@@ -191,11 +185,7 @@ def chunk_text(
         if not atom:
             continue
 
-        candidate = (
-            f"{current}\n{atom}"
-            if current
-            else atom
-        )
+        candidate = f"{current}\n{atom}" if current else atom
 
         if current and len(candidate) > body_limit:
             chunks.append(
@@ -233,11 +223,7 @@ def chunk_text(
                 overlap,
             )
 
-            final_text = (
-                f"{tail}\n{chunk.text}"
-                if tail
-                else chunk.text
-            )
+            final_text = f"{tail}\n{chunk.text}" if tail else chunk.text
 
         # Defensive invariant: no final chunk may exceed chunk_size.
         if len(final_text) > chunk_size:

@@ -6,7 +6,6 @@ from sqlalchemy.orm import Session
 
 from app.services.models import Tenant, UsageRecord
 
-
 UsageOperation = Literal["embed", "generate"]
 
 
@@ -36,10 +35,7 @@ class UsageService:
         """
 
         tenant = (
-            db.query(Tenant)
-            .filter(Tenant.id == tenant_id)
-            .with_for_update()
-            .first()
+            db.query(Tenant).filter(Tenant.id == tenant_id).with_for_update().first()
         )
 
         if tenant is None:
@@ -69,7 +65,7 @@ class UsageService:
             thinking_tokens=0,
             total_tokens=0,
             reserved_cost=reserved_cost,
-            actual_cost=Decimal("0"),
+            actual_cost=Decimal(0),
             status="reserved",
         )
 
@@ -104,14 +100,11 @@ class UsageService:
 
         total_reserved = sum(
             (reservation.reserved_cost for reservation in reservations),
-            Decimal("0"),
+            Decimal(0),
         )
 
         tenant = (
-            db.query(Tenant)
-            .filter(Tenant.id == tenant_id)
-            .with_for_update()
-            .first()
+            db.query(Tenant).filter(Tenant.id == tenant_id).with_for_update().first()
         )
 
         if tenant is None:
@@ -144,7 +137,7 @@ class UsageService:
                 thinking_tokens=0,
                 total_tokens=0,
                 reserved_cost=reservation.reserved_cost,
-                actual_cost=Decimal("0"),
+                actual_cost=Decimal(0),
                 status="reserved",
             )
 
@@ -214,11 +207,9 @@ class UsageService:
             raise ValueError(f"Tenant {usage.tenant_id} not found")
 
         current_spend = Decimal(str(tenant.current_spend))
-        tenant.current_spend = current_spend - Decimal(
-            str(usage.reserved_cost)
-        )
+        tenant.current_spend = current_spend - Decimal(str(usage.reserved_cost))
 
-        usage.actual_cost = Decimal("0")
+        usage.actual_cost = Decimal(0)
         usage.status = "failed"
 
         db.flush()

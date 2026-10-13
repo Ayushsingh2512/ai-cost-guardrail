@@ -1,9 +1,9 @@
-from fastapi import APIRouter, HTTPException, Depends
+from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
-from app.services.redis_client import get_redis_client, ping_redis
 from app.services.database import get_db
+from app.services.redis_client import get_redis_client, ping_redis
 
 router = APIRouter(prefix="/health", tags=["Health"])
 
