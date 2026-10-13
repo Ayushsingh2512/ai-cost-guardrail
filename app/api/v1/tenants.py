@@ -6,7 +6,6 @@ from sqlalchemy.orm import Session
 from app.services.database import get_db
 from app.services.models import Tenant
 
-
 router = APIRouter(prefix="/tenants", tags=["Tenants"])
 
 
@@ -15,7 +14,7 @@ def create_tenant(
     name: str = Query(..., min_length=1, max_length=255),
     monthly_budget: Decimal = Query(
         Decimal("100.000000"),
-        gt=Decimal("0"),
+        gt=0.0,
     ),
     db: Session = Depends(get_db),
 ):
