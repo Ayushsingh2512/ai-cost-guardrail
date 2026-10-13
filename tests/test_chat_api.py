@@ -1,23 +1,18 @@
-from fastapi.testclient import TestClient
-
-from app.main import app
-
 from unittest.mock import patch
 
-from app.api.dependencies import get_redis_client
-
-from app.services.guardrail import RateLimitExceeded
-from app.schemas.chat import ChatRequest
 import httpx
+from fastapi.testclient import TestClient
 
-from app.api.dependencies import enforce_guardrails, get_genai_client
-from app.services.database import get_db
-from app.services.models import Tenant, User, UsageRecord
+from app.api.dependencies import enforce_guardrails, get_genai_client, get_redis_client
+from app.main import app
+from app.schemas.chat import ChatRequest
 from app.services.circuit_breaker import (
-    circuit_breaker,
     CircuitState,
+    circuit_breaker,
 )
-
+from app.services.database import get_db
+from app.services.guardrail import RateLimitExceeded
+from app.services.models import Tenant, UsageRecord, User
 
 client = TestClient(app)
 
@@ -33,7 +28,8 @@ def test_chat_requires_authentication():
     )
 
     assert response.status_code == 401
-    
+
+
 def test_chat_rejects_invalid_token():
     response = client.post(
         "/api/v1/chat",
@@ -48,7 +44,8 @@ def test_chat_rejects_invalid_token():
     )
 
     assert response.status_code == 401
-    
+
+
 def test_chat_rejects_token_without_tenant_id():
     with patch(
         "app.api.dependencies.verify_access_token",
@@ -67,7 +64,8 @@ def test_chat_rejects_token_without_tenant_id():
         )
 
     assert response.status_code == 401
-    
+
+
 def test_chat_rejects_token_without_user_id():
     with patch(
         "app.api.dependencies.verify_access_token",
@@ -86,6 +84,8 @@ def test_chat_rejects_token_without_user_id():
         )
 
     assert response.status_code == 401
+
+
 def test_chat_rejects_excessive_token_limit():
     with patch(
         "app.api.dependencies.verify_access_token",
@@ -107,6 +107,8 @@ def test_chat_rejects_excessive_token_limit():
         )
 
     assert response.status_code == 400
+
+
 def test_chat_rejects_unsupported_model():
     with patch(
         "app.api.dependencies.verify_access_token",
@@ -128,7 +130,8 @@ def test_chat_rejects_unsupported_model():
         )
 
     assert response.status_code == 400
-    
+
+
 def test_chat_returns_429_when_rate_limit_exceeded():
     def fake_redis():
         return object()
@@ -136,15 +139,18 @@ def test_chat_returns_429_when_rate_limit_exceeded():
     def fake_rate_limit(redis_client, tenant_id, limit=30, window_seconds=60):
         raise RateLimitExceeded("Rate limit exceeded")
 
-    with patch(
-        "app.api.dependencies.verify_access_token",
-        return_value={
-            "tenant_id": "1",
-            "user_id": "1",
-        },
-    ), patch(
-        "app.api.dependencies.guardrail_service.check_rate_limit",
-        side_effect=fake_rate_limit,
+    with (
+        patch(
+            "app.api.dependencies.verify_access_token",
+            return_value={
+                "tenant_id": "1",
+                "user_id": "1",
+            },
+        ),
+        patch(
+            "app.api.dependencies.guardrail_service.check_rate_limit",
+            side_effect=fake_rate_limit,
+        ),
     ):
         app.dependency_overrides[get_redis_client] = fake_redis
 
@@ -164,6 +170,8 @@ def test_chat_returns_429_when_rate_limit_exceeded():
             app.dependency_overrides.clear()
 
     assert response.status_code == 429
+
+
 def test_chat_returns_503_when_rate_limiter_unavailable():
     def fake_redis():
         return object()
@@ -171,15 +179,18 @@ def test_chat_returns_503_when_rate_limiter_unavailable():
     def fake_rate_limit(redis_client, tenant_id, limit=30, window_seconds=60):
         raise RuntimeError("Rate limiting service is unavailable")
 
-    with patch(
-        "app.api.dependencies.verify_access_token",
-        return_value={
-            "tenant_id": "1",
-            "user_id": "1",
-        },
-    ), patch(
-        "app.api.dependencies.guardrail_service.check_rate_limit",
-        side_effect=fake_rate_limit,
+    with (
+        patch(
+            "app.api.dependencies.verify_access_token",
+            return_value={
+                "tenant_id": "1",
+                "user_id": "1",
+            },
+        ),
+        patch(
+            "app.api.dependencies.guardrail_service.check_rate_limit",
+            side_effect=fake_rate_limit,
+        ),
     ):
         app.dependency_overrides[get_redis_client] = fake_redis
 
@@ -199,7 +210,8 @@ def test_chat_returns_503_when_rate_limiter_unavailable():
             app.dependency_overrides.clear()
 
     assert response.status_code == 503
-    
+
+
 def test_chat_returns_503_when_token_counting_fails(db):
     from app.api.dependencies import get_genai_client
     from app.services.database import get_db
@@ -282,7 +294,8 @@ def test_chat_returns_503_when_token_counting_fails(db):
     db.refresh(tenant)
 
     assert tenant.current_spend == 0
-    
+
+
 def test_chat_recovers_when_settlement_fails(db):
     class FakeUsageMetadata:
         prompt_token_count = 50
@@ -346,18 +359,22 @@ def test_chat_recovers_when_settlement_fails(db):
     app.dependency_overrides[enforce_guardrails] = override_guardrails
 
     try:
-        with patch(
-            "app.api.dependencies.verify_access_token",
-            return_value={
-                "tenant_id": str(tenant.id),
-                "user_id": str(user.id),
-            },
-        ), patch(
-            "app.api.v1.chat.uuid4",
-            return_value=request_id,
-        ), patch(
-            "app.api.v1.chat.usage_service.settle_success",
-            side_effect=RuntimeError("Simulated settlement failure"),
+        with (
+            patch(
+                "app.api.dependencies.verify_access_token",
+                return_value={
+                    "tenant_id": str(tenant.id),
+                    "user_id": str(user.id),
+                },
+            ),
+            patch(
+                "app.api.v1.chat.uuid4",
+                return_value=request_id,
+            ),
+            patch(
+                "app.api.v1.chat.usage_service.settle_success",
+                side_effect=RuntimeError("Simulated settlement failure"),
+            ),
         ):
             response = client.post(
                 "/api/v1/chat",
@@ -375,23 +392,18 @@ def test_chat_recovers_when_settlement_fails(db):
         app.dependency_overrides.clear()
 
     assert response.status_code == 500
-    assert response.json()["detail"] == (
-        "LLM succeeded but usage settlement failed"
-    )
+    assert response.json()["detail"] == ("LLM succeeded but usage settlement failed")
 
     db.refresh(tenant)
 
     assert tenant.current_spend == initial_spend
 
-    usage = (
-        db.query(UsageRecord)
-        .filter(UsageRecord.request_id == request_id)
-        .one()
-    )
+    usage = db.query(UsageRecord).filter(UsageRecord.request_id == request_id).one()
 
     assert usage.status == "failed"
     assert usage.actual_cost == 0
-    
+
+
 def test_chat_returns_504_when_llm_generation_times_out(db):
     class FakeUsageMetadata:
         prompt_token_count = 50
@@ -411,9 +423,7 @@ def test_chat_returns_504_when_llm_generation_times_out(db):
             return TokenCount()
 
         async def generate_content(self, **kwargs):
-            raise httpx.ReadTimeout(
-                "Simulated LLM generation timeout"
-            )
+            raise httpx.ReadTimeout("Simulated LLM generation timeout")
 
     class FakeAio:
         def __init__(self):
@@ -496,9 +506,7 @@ def test_chat_returns_504_when_llm_generation_times_out(db):
         circuit_breaker._probe_in_flight = original_probe_in_flight
 
     assert response.status_code == 504
-    assert response.json()["detail"] == (
-        "LLM provider request timed out"
-    )
+    assert response.json()["detail"] == ("LLM provider request timed out")
 
     db.refresh(tenant)
 

@@ -1,8 +1,8 @@
 from uuid import uuid4
-import httpx
-from google.genai import errors
 
+import httpx
 from fastapi import APIRouter, Depends, HTTPException
+from google.genai import errors
 from sqlalchemy.orm import Session
 
 from app.api.dependencies import (
@@ -12,11 +12,10 @@ from app.api.dependencies import (
 )
 from app.schemas.chat import ChatRequest
 from app.services.circuit_breaker import circuit_breaker
-from app.services.database import get_db
 from app.services.cost_engine import cost_engine
+from app.services.database import get_db
 from app.services.models import Tenant
 from app.services.usage import usage_service
-
 
 router = APIRouter(prefix="/api/v1", tags=["Chat"])
 
@@ -35,11 +34,7 @@ async def chat(
     # Find tenant
     # ─────────────────────────────────────
 
-    tenant = (
-        db.query(Tenant)
-        .filter(Tenant.id == tenant_id)
-        .first()
-    )
+    tenant = db.query(Tenant).filter(Tenant.id == tenant_id).first()
 
     if tenant is None:
         raise HTTPException(
@@ -66,7 +61,7 @@ async def chat(
         raise HTTPException(
             status_code=503,
             detail="LLM provider token counting is currently unavailable",
-    )
+        )
 
     input_tokens_estimate = token_count.total_tokens or 0
 
@@ -141,7 +136,7 @@ async def chat(
             },
         )
 
-    except httpx.TimeoutException as e:
+    except httpx.TimeoutException:
         circuit_breaker.record_failure()
 
         try:
@@ -184,7 +179,7 @@ async def chat(
 
         raise HTTPException(
             status_code=502,
-            detail=f"Upstream LLM Error: {str(e)}",
+            detail=f"Upstream LLM Error: {e!s}",
         )
 
     # Gemini successfully responded.
