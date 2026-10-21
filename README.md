@@ -1,5 +1,7 @@
 # ai-cost-guardrail
 
+[![Tests](https://github.com/Ayushsingh2512/ai-cost-guardrail/actions/workflows/test.yml/badge.svg)](https://github.com/Ayushsingh2512/ai-cost-guardrail/actions/workflows/test.yml)
+
 A backend and system-design learning project for building an **LLM Cost & Guardrail Gateway** — a service that sits between applications and LLM providers and handles the infrastructure around LLM calls: authentication, tenant isolation, rate limiting, budget enforcement, cost accounting, usage auditing, reliability, and retrieval-augmented generation (RAG).
 
 The goal is not to pretend this is a complete enterprise AI platform. The goal is to build, test, and understand the engineering problems that appear around real LLM workloads.
@@ -784,50 +786,40 @@ The next focus is to finish the **cost-controlled RAG request lifecycle** withou
 
 ## Project structure
 
+### Repository root
+
 ```text
 ai-cost-guardrail/
 
-├── app/
-│   ├── api/
-│   │   ├── v1/
-│   │   │   ├── __init__.py
-│   │   │   ├── chat.py
-│   │   │   ├── health.py
-│   │   │   ├── rag.py
-│   │   │   └── tenants.py
-│   │   └── dependencies.py
-│   │
-│   ├── core/
-│   │   ├── config.py
-│   │   ├── database.py
-│   │   └── security.py
-│   │
-│   ├── rag/
-│   │   ├── chunking.py
-│   │   ├── embeddings.py
-│   │   ├── generation.py
-│   │   ├── ingestion.py
-│   │   ├── pipeline.py
-│   │   └── retriever.py
-│   │
-│   ├── schemas/
-│   │   ├── chat.py
-│   │   └── rag.py
-│   │
-│   ├── services/
-│   │   ├── circuit_breaker.py
-│   │   ├── cost_engine.py
-│   │   ├── guardrail.py
-│   │   ├── models.py
-│   │   ├── redis_client.py
-│   │   └── usage.py
-│   │
-│   └── main.py
-│
+├── .env.example
+├── .gitignore
+├── .python-version
 ├── alembic/
+│   ├── README
+│   ├── env.py
+│   ├── script.py.mako
+│   └── versions/
+│       ├── 086da34b695d_add_pgvector_documents_and_chunks.py
+│       ├── 3f4fef3dda06_remove_orphaned_budget_status_column.py
+│       ├── 40a0497e9652_create_tenants_and_users.py
+│       ├── 41f01c67162a_convert_tenant_money_fields_to_numeric.py
+│       ├── a593c7273588_add_usage_operation.py
+│       ├── d0037b857ee4_add_usage_records.py
+│       └── f9540b35ac35_add_thinking_tokens_to_usage_records.py
+├── alembic.ini
+├── ai_guardrail_backup.sql
+├── ai_guardrail_before_migration_repair.sql
+├── code-bundle.txt
 ├── docs/
 │   └── architecture_diagram.png
+├── docker-compose.yml
+├── Dockerfile
+├── LICENSE
+├── pyproject.toml
+├── README.md
 ├── tests/
+│   ├── __init__.py
+│   ├── conftest.py
 │   ├── test_chat_api.py
 │   ├── test_chunking.py
 │   ├── test_circuit_breaker.py
@@ -838,6 +830,7 @@ ai-cost-guardrail/
 │   ├── test_generation.py
 │   ├── test_guardrail.py
 │   ├── test_ingestion.py
+│   ├── test_model_registry.py
 │   ├── test_pipeline.py
 │   ├── test_rag_api.py
 │   ├── test_rag_schema.py
@@ -845,14 +838,48 @@ ai-cost-guardrail/
 │   ├── test_retriever.py
 │   ├── test_usage_record.py
 │   └── test_usage_service.py
-│
-├── .env.example
-├── Dockerfile
-├── docker-compose.yml
-├── pyproject.toml
-├── README.md
-├── requirements.txt
 └── uv.lock
+
+### Python package
+
+```
+ai-cost-guardrail/app/
+├── __init__.py
+├── main.py
+├── api/
+│   ├── dependencies.py
+│   └── v1/
+│       ├── __init__.py
+│       ├── chat.py
+│       ├── health.py
+│       ├── rag.py
+│       └── tenants.py
+├── core/
+│   ├── __init__.py
+│   ├── config.py
+│   ├── model_registry.py
+│   └── security.py
+├── rag/
+│   ├── __init__.py
+│   ├── chunking.py
+│   ├── embeddings.py
+│   ├── generation.py
+│   ├── ingestion.py
+│   ├── pipeline.py
+│   └── retriever.py
+├── schemas/
+│   ├── __init__.py
+│   ├── chat.py
+│   └── rag.py
+└── services/
+    ├── __init__.py
+    ├── circuit_breaker.py
+    ├── cost_engine.py
+    ├── database.py
+    ├── guardrail.py
+    ├── models.py
+    ├── redis_client.py
+    └── usage.py
 ```
 
 ---
