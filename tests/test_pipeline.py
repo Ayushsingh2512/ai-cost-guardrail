@@ -1,9 +1,9 @@
-from __future__ import annotations
-
 from dataclasses import dataclass
+from decimal import Decimal
 
 import pytest
 
+from app.rag.embeddings import EmbedResult
 from app.rag.generation import (
     ContextPassage,
     GenerationResult,
@@ -33,6 +33,7 @@ def make_generation_result(
 class RecordingEmbedder:
     vector: list[float]
     calls: list[str]
+    tokens: int = 10
 
     @property
     def fingerprint(self) -> str:
@@ -41,6 +42,13 @@ class RecordingEmbedder:
     def embed_query(self, query: str) -> list[float]:
         self.calls.append(query)
         return self.vector
+
+    def embed_query_with_usage(self, query: str) -> EmbedResult:
+        vector = self.embed_query(query)
+        return EmbedResult(vector=vector, tokens=self.tokens)
+
+    def count_tokens(self, text: str) -> int:
+        return self.tokens
 
 
 @dataclass
@@ -376,7 +384,8 @@ async def test_pipeline_returns_retrieved_refs_and_timings():
         isinstance(value, int) and value >= 0 for value in result.timings_ms.values()
     )
 
-    assert result.embedding_tokens is None
+    assert result.embedding_tokens == 10
+    assert result.total_cost == Decimal(0)
 
 
 @pytest.mark.asyncio

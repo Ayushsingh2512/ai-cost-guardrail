@@ -49,6 +49,12 @@ class EmbeddingConfig:
 
 
 @dataclass(frozen=True)
+class EmbedResult:
+    vector: list[float]
+    tokens: int
+
+
+@dataclass(frozen=True)
 class EmbeddedChunk:
     chunk: DocumentChunk
     embedding: list[float]
@@ -146,6 +152,21 @@ class GeminiEmbedder:
         )
 
         return vectors[0]
+
+    def embed_query_with_usage(self, query: str) -> EmbedResult:
+        self._validate_text(query)
+        try:
+            count = self.client.models.count_tokens(
+                model=self.config.model,
+                contents=query,
+            )
+        except Exception as exc:
+            raise EmbeddingProviderError(
+                "Embedding token counting is unavailable"
+            ) from exc
+        tokens = count.total_tokens or 0
+        vector = self.embed_query(query)  # reuse existing method
+        return EmbedResult(vector=vector, tokens=tokens)
 
     def _embed(
         self,
@@ -455,6 +476,14 @@ class FakeEmbedder:
         query: str,
     ) -> list[float]:
         return self._embed_text(query)
+
+    def embed_query_with_usage(
+        self,
+        query: str,
+    ) -> EmbedResult:
+        vector = self.embed_query(query)
+        tokens = self.count_tokens(query)
+        return EmbedResult(vector=vector, tokens=tokens)
 
     def count_tokens(self, text: str) -> int:
         """Conservative character-based estimate (ceil(len / 3))."""

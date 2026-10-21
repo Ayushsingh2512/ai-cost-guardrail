@@ -298,7 +298,8 @@ def test_rag_successfully_maps_service_result(db):
     )
 
     class FakeRAGService:
-        async def answer(self, *, tenant_id, query, top_k):
+        async def answer(self, *, tenant_id, query, top_k, budget):
+            assert budget is not None, "route must pass RAGBudget to service"
             assert tenant_id == tenant.id
             assert query == "What is the refund policy?"
             assert top_k == 5

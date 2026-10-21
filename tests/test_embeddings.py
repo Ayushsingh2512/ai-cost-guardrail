@@ -11,6 +11,7 @@ from app.rag.embeddings import (
     EmbeddingInputError,
     EmbeddingProviderError,
     EmbeddingRateLimitError,
+    EmbedResult,
     FakeEmbedder,
     GeminiEmbedder,
     embed_chunks,
@@ -475,3 +476,59 @@ def test_count_tokens_empty_input_raises_for_fake_embedder():
 
     with pytest.raises(EmbeddingInputError):
         fake.count_tokens("   ")
+
+
+def test_gemini_embed_query_with_usage_calls_count_tokens():
+    """GeminiEmbedder.embed_query_with_usage calls count_tokens exactly once with right model and query."""
+    client = StubCountTokensClient(ct_tokens=27)
+    embedder = make_ct(client)
+
+    res = embedder.embed_query_with_usage("search query")
+
+    assert isinstance(res, EmbedResult)
+    assert res.tokens == 27
+    assert len(res.vector) == 2
+    assert len(client.ct_calls) == 1
+    assert client.ct_calls[0].model == embedder.config.model
+    assert client.ct_calls[0].contents == "search query"
+
+
+def test_gemini_embed_query_with_usage_count_tokens_failure_raises():
+    """count_tokens failure in embed_query_with_usage raises EmbeddingProviderError."""
+    client = StubCountTokensClient(ct_script=[RuntimeError("count failed")])
+    embedder = make_ct(client)
+
+    with pytest.raises(
+        EmbeddingProviderError, match="Embedding token counting is unavailable"
+    ):
+        embedder.embed_query_with_usage("search query")
+
+
+def test_fake_embedder_embed_query_with_usage_deterministic():
+    """FakeEmbedder.embed_query_with_usage returns a stable deterministic count for the same input."""
+    fake = FakeEmbedder(dimensions=4)
+    query = "Deterministic test query"
+
+    res1 = fake.embed_query_with_usage(query)
+    res2 = fake.embed_query_with_usage(query)
+
+    assert isinstance(res1, EmbedResult)
+    assert res1.tokens == res2.tokens
+    assert res1.vector == res2.vector
+    assert isinstance(res1.tokens, int)
+    assert res1.tokens > 0
+
+
+def test_fake_embedder_both_methods():
+    """FakeEmbedder supports both embed_query and embed_query_with_usage."""
+    fake = FakeEmbedder(dimensions=4)
+    query = "Search query for testing"
+
+    vector = fake.embed_query(query)
+    assert isinstance(vector, list)
+    assert len(vector) == 4
+
+    result = fake.embed_query_with_usage(query)
+    assert isinstance(result, EmbedResult)
+    assert result.vector == vector
+    assert result.tokens == fake.count_tokens(query)

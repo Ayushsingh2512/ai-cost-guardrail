@@ -323,32 +323,40 @@ class GenerationService:
         """Private alias kept for backward compatibility; delegates to build_prompt."""
         return self.build_prompt(query=query, passages=passages)
 
-    async def count_prompt_tokens(self, prompt: str) -> int:
+    async def count_prompt_tokens(
+        self,
+        query: str,
+        passages: Sequence[ContextPassage] | None = None,
+        *,
+        prompt: str | None = None,
+    ) -> int:
         """
-        Count the billable input tokens for *prompt* as the model would see
-        them, including the SYSTEM_INSTRUCTION that generate_content always
-        sends.
+        Count the billable input tokens for a query + passages as the model
+        would see them, including the SYSTEM_INSTRUCTION.
 
-        A single count_tokens call is made, passing system_instruction via
-        CountTokensConfig so the system instruction tokens are included in
-        the same request rather than a second separate call.
-        (CountTokensConfig.system_instruction was confirmed present in the
-        installed SDK version.)
-
-        Returns the total_tokens value from the response (int, ≥ 0).
+        Builds the same prompt as _build_prompt and calls client.aio.models.count_tokens.
+        Fail-closed: if count_tokens fails, raises GenerationProviderError.
         """
+        if passages is not None:
+            prompt_str = self.build_prompt(query=query, passages=passages)
+        elif prompt is not None:
+            prompt_str = prompt
+        else:
+            prompt_str = query
+
         try:
             response = await self.client.aio.models.count_tokens(
                 model=self.config.model,
-                contents=prompt,
+                contents=prompt_str,
                 config=types.CountTokensConfig(
                     system_instruction=SYSTEM_INSTRUCTION,
                 ),
             )
         except Exception as exc:
-            raise self._map_provider_exception(exc) from exc
+            raise GenerationProviderError("Failed to count prompt tokens") from exc
 
-        return response.total_tokens or 0
+        total_tokens = getattr(response, "total_tokens", None)
+        return total_tokens or 0
 
     def _parse_citations(
         self,

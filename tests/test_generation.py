@@ -703,12 +703,12 @@ async def test_count_prompt_tokens_passes_system_instruction():
 
 @pytest.mark.asyncio
 async def test_count_prompt_tokens_maps_rate_limit_error():
-    """429 from count_tokens is mapped to GenerationRateLimitError."""
+    """Fail-closed: 429 from count_tokens is mapped to GenerationProviderError."""
     client, _ = make_counting_client(ct_error=FakeError("rate limit", code=429))
 
     service = GenerationService(client=client)
 
-    with pytest.raises(GenerationRateLimitError):
+    with pytest.raises(GenerationProviderError):
         await service.count_prompt_tokens("prompt")
 
 
@@ -721,6 +721,25 @@ async def test_count_prompt_tokens_maps_server_error():
 
     with pytest.raises(GenerationProviderError):
         await service.count_prompt_tokens("prompt")
+
+
+@pytest.mark.asyncio
+async def test_count_prompt_tokens_with_query_and_passages(passages):
+    """count_prompt_tokens(query, passages) builds grounded prompt and counts tokens."""
+    client, models = make_counting_client(ct_tokens=88)
+    service = GenerationService(client=client)
+
+    tokens = await service.count_prompt_tokens(
+        query="What is the refund period?",
+        passages=passages,
+    )
+
+    assert tokens == 88
+    assert len(models.ct_calls) == 1
+    sent_prompt = models.ct_calls[0].contents
+    assert "EVIDENCE" in sent_prompt
+    assert "QUESTION" in sent_prompt
+    assert "What is the refund period?" in sent_prompt
 
 
 @pytest.mark.asyncio

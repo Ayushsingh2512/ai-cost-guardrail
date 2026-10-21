@@ -1,3 +1,4 @@
+from decimal import Decimal
 from typing import Literal
 
 from pydantic import BaseModel, Field
@@ -31,3 +32,5 @@ class RAGResponse(BaseModel):
     retrieved_count: int
     timings_ms: dict[str, int]
     embedding_tokens: int | None = None
+    request_id: str | None = None
+    total_cost: Decimal = Decimal(0)

@@ -9,6 +9,10 @@ from app.services.models import Tenant, UsageRecord
 UsageOperation = Literal["embed", "generate"]
 
 
+class BudgetExceededError(ValueError):
+    """Raised when a reservation would push a tenant over their monthly budget."""
+
+
 @dataclass(frozen=True)
 class BudgetReservation:
     operation: UsageOperation
@@ -45,7 +49,7 @@ class UsageService:
         monthly_budget = Decimal(str(tenant.monthly_budget))
 
         if current_spend + reserved_cost > monthly_budget:
-            raise ValueError(
+            raise BudgetExceededError(
                 f"Request would exceed budget. "
                 f"Spent so far: ${current_spend:.6f}, "
                 f"Reserved: ${reserved_cost:.6f}, "
@@ -114,7 +118,7 @@ class UsageService:
         monthly_budget = Decimal(str(tenant.monthly_budget))
 
         if current_spend + total_reserved > monthly_budget:
-            raise ValueError(
+            raise BudgetExceededError(
                 f"Request would exceed budget. "
                 f"Spent so far: ${current_spend:.6f}, "
                 f"Reserved: ${total_reserved:.6f}, "
