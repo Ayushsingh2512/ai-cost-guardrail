@@ -31,3 +31,6 @@ coverage.xml
 code-bundle.txt
 
 .freebuff/
+code-bundle.txt
+*.sql
+.freebuff/
