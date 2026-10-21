@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import logging
 import math
 import time
 from collections.abc import Callable, Sequence
@@ -10,6 +11,8 @@ from google import genai
 from google.genai import types
 
 from app.rag.chunking import DocumentChunk
+
+logger = logging.getLogger(__name__)
 
 DEFAULT_MODEL = "gemini-embedding-001"
 DEFAULT_DIMENSIONS = 768
@@ -322,6 +325,80 @@ class GeminiEmbedder:
         delay = 2**attempt
         self.sleep(delay)
 
+    def count_tokens(self, text: str) -> int:
+        """
+        Return the token count for *text* as reported by the Gemini API.
+
+        If the provider rejects the call with an "unsupported model"-style
+        error, falls back to a conservative estimate: ceil(len(text) / 3).
+        All other provider failures (5xx, rate-limit) are retried with the
+        same backoff used by _embed_batch and then re-raised as
+        EmbeddingProviderError / EmbeddingRateLimitError.
+        """
+        last_error: Exception | None = None
+
+        for attempt in range(self.config.max_retries + 1):
+            try:
+                response = self.client.models.count_tokens(
+                    model=self.config.model,
+                    contents=text,
+                )
+                return response.total_tokens or 0
+
+            except Exception as exc:
+                last_error = exc
+
+                # Unsupported-model errors are not retryable; fall back.
+                if self._is_unsupported_model(exc):
+                    estimate = math.ceil(len(text) / 3)
+                    logger.warning(
+                        "count_tokens: model %r does not support token counting "
+                        "(%s); using character-based estimate of %d tokens",
+                        self.config.model,
+                        exc,
+                        estimate,
+                    )
+                    return estimate
+
+                code = getattr(exc, "code", None)
+
+                if self._is_rate_limit(code):
+                    if attempt >= self.config.max_retries:
+                        raise EmbeddingRateLimitError(
+                            "Embedding provider rate limit persisted after retries"
+                        ) from exc
+                    self._sleep_before_retry(attempt)
+                    continue
+
+                if self._is_retryable(code, exc):
+                    if attempt >= self.config.max_retries:
+                        raise EmbeddingProviderError(
+                            "Embedding provider failed after retries"
+                        ) from exc
+                    self._sleep_before_retry(attempt)
+                    continue
+
+                raise EmbeddingProviderError("Token counting request failed") from exc
+
+        raise EmbeddingProviderError("Token counting failed") from last_error
+
+    @staticmethod
+    def _is_unsupported_model(exc: Exception) -> bool:
+        """
+        Return True when the provider error indicates the model does not
+        support the requested operation (e.g. count_tokens on an embedding
+        model).  We key on HTTP 400 *and* a message containing phrases like
+        "not supported", "unsupported", or "does not support".
+        """
+        code = getattr(exc, "code", None)
+        if code != 400:
+            return False
+        msg = str(exc).lower()
+        return any(
+            phrase in msg
+            for phrase in ("not supported", "unsupported", "does not support")
+        )
+
     @classmethod
     def from_env(
         cls,
@@ -378,6 +455,12 @@ class FakeEmbedder:
         query: str,
     ) -> list[float]:
         return self._embed_text(query)
+
+    def count_tokens(self, text: str) -> int:
+        """Conservative character-based estimate (ceil(len / 3))."""
+        if not isinstance(text, str) or not text.strip():
+            raise EmbeddingInputError("Embedding input cannot be empty")
+        return math.ceil(len(text) / 3)
 
     def _embed_text(
         self,

@@ -19,6 +19,8 @@ class Embedder(Protocol):
 
     def embed_query(self, query: str) -> list[float]: ...
 
+    def count_tokens(self, text: str) -> int: ...
+
 
 class Retriever(Protocol):
     def search(
@@ -101,6 +103,7 @@ class RAGService:
                 "retrieve": retrieve_ms,
                 "generate": generate_ms,
             },
+            # ESTIMATED: embed_content returns no usage_metadata; token count comes from count_tokens() estimate.
             embedding_tokens=None,
         )
 
