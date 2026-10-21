@@ -20,15 +20,25 @@ depends_on: str | Sequence[str] | None = None
 
 
 def upgrade() -> None:
-    op.drop_column("usage_records", "budget_status")
+    bind = op.get_bind()
+    inspector = sa.inspect(bind)
+    columns = {col["name"] for col in inspector.get_columns("usage_records")}
+
+    if "budget_status" in columns:
+        op.drop_column("usage_records", "budget_status")
 
 
 def downgrade() -> None:
-    op.add_column(
-        "usage_records",
-        sa.Column(
-            "budget_status",
-            sa.String(length=30),
-            nullable=False,
-        ),
-    )
+    bind = op.get_bind()
+    inspector = sa.inspect(bind)
+    columns = {col["name"] for col in inspector.get_columns("usage_records")}
+
+    if "budget_status" not in columns:
+        op.add_column(
+            "usage_records",
+            sa.Column(
+                "budget_status",
+                sa.String(length=30),
+                nullable=False,
+            ),
+        )
