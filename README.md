@@ -48,11 +48,13 @@ The goal is not to pretend this is a complete enterprise AI platform. The goal i
 - Provenance tracking for retrieved context sent to the model
 - Controlled handling of provider safety blocks and provider failures
 - `POST /api/v1/rag/query` API endpoint with authentication, guardrails, request validation, tenant lookup, and response mapping
+- Sequential RAG budget reservation and settlement across embedding and generation
+- Preflight query token counting using Gemini `count_tokens`
+- Automatic reservation release on embedding or generation failure
+- Grounded generation cost accounting with prompt token counting and thinking-token awareness
 
 ### Intentionally not implemented yet
 
-- RAG usage/budget reservation and settlement across embedding + generation
-- Final RAG end-to-end integration with real provider/database dependencies
 - PII detection, prompt-injection detection, and secret-leak checks
 - Semantic caching
 - Distributed circuit-breaker state
@@ -219,7 +221,7 @@ The usage service also supports atomic batch reservation for multiple operations
 
 However, the current RAG lifecycle intentionally does **not** use the batch reservation path because the generation cost cannot be known until retrieval has completed and the final generation prompt is available.
 
-The intended RAG accounting model is therefore sequential:
+The RAG accounting model is therefore sequential:
 
 ```text
 Embed query
@@ -245,9 +247,29 @@ Settle embedding + generation
 
 This avoids fabricating generation token estimates before the retrieved context is known.
 
+### Incomplete usage metadata
+
+When a provider returns a successful response but with missing or invalid usage fields (e.g. `prompt_tokens` or `completion_tokens` is `None`), the gateway applies a **fail-closed** policy:
+
+- The generation `usage_record` is **not** settled at zero cost.
+- The generation reservation is **preserved** (kept in `"reserved"` status) rather than released.
+- `current_spend` retains the reserved amount, so the tenant's effective budget is protected.
+- The API responds with **HTTP 502** (`GenerationProviderError`), signalling an upstream fault rather than a client error.
+- The embedding `usage_record` is **not** double-released because `release_all()` skips records that are no longer in `"reserved"` status.
+- The generation reservation is **not** released by `release_all()` when the preservation flag is set.
+
+The preserved reservation remains in `"reserved"` status indefinitely. A future sweeper job will be responsible for detecting stale reservations and either recovering them or issuing refunds after operator review. Until that sweeper is implemented, stale records can be identified with:
+
+```sql
+SELECT * FROM usage_records
+WHERE status = 'reserved'
+  AND created_at < now() - interval '1 hour';
+```
+
 ---
 
 ## Circuit breaker
+
 
 The gateway uses a circuit breaker around the upstream LLM call.
 
@@ -380,7 +402,7 @@ The embedding layer also maintains a configuration fingerprint so stored vectors
 
 Embedding pricing is represented separately in `CostEngine`, because embedding is a distinct billable operation from text generation.
 
-The embedding implementation currently returns vectors but does not yet propagate the real embedding token count through the full RAG accounting path. Completing RAG cost accounting will therefore require the embedder contract and corresponding tests to carry real embedding usage metadata.
+Query token counts are obtained through the Gemini `count_tokens` API. This is a preflight token count run by the model tokenizer before the embedding call, rather than usage metadata returned in the embedding response (as verified by provider diagnostics, Gemini embedding API responses do not expose usage metadata). The preflight token count is used to reserve budget before calling the provider and is then reused to settle embedding cost, eliminating duplicate tokenizer requests while strictly adhering to the principle against fabricated usage data.
 
 ### Chunking
 
@@ -506,7 +528,7 @@ Example shape:
 }
 ```
 
-`embedding_tokens` is part of the response contract, but complete RAG financial accounting is not considered finished until the real provider usage is propagated through the embedder, reservation, and settlement path.
+`embedding_tokens` reflects the preflight input token count returned by Gemini `count_tokens`, which is reserved before the embedding call and settled into the ledger.
 
 ---
 
@@ -664,7 +686,7 @@ The gateway currently provides:
 
 ### Test status
 
-**184 tests passing**
+**278 tests passing**
 
 The suite currently covers the gateway, accounting, guardrails, circuit breaker, RAG pipeline, RAG API boundary, tenant-safe schema rules, development-only routes, and migration/model consistency checks.
 
@@ -728,23 +750,22 @@ The suite currently covers the gateway, accounting, guardrails, circuit breaker,
 - [x] Development tenant input validation
 - [x] Development route production-isolation tests
 - [x] Alembic schema-drift verification with `alembic check`
-- [x] 184-test verification suite
+- [x] Sequential RAG budget reservation and settlement across embedding and generation
+- [x] Preflight query token counting with Gemini `count_tokens` API
+- [x] Reuse of preflight query token count between reservation and settlement without duplicate count requests
+- [x] Fail-closed handling and error mapping for RAG accounting misconfigurations
+- [x] Automatic reservation release on embedding and generation failure paths
+- [x] 278-test verification suite
 
 ---
 
 ## Next
 
-The next focus is to finish the **cost-controlled RAG request lifecycle** without inventing inaccurate token estimates.
+The next focus is completing real-dependency validation, failure recovery, and system hardening without inventing inaccurate token estimates.
 
-### RAG accounting
+### RAG integration & smoke testing
 
-- [ ] Propagate real embedding token usage through the embedder contract
-- [ ] RAG embedding budget reservation
-- [ ] Determine/measure generation prompt input tokens after retrieval
-- [ ] RAG generation budget reservation
-- [ ] RAG usage settlement for embedding + generation operations
-- [ ] Validate sequential reservation behavior under budget pressure
-- [ ] End-to-end RAG integration tests with real database boundaries and mocked providers
+- [ ] End-to-end RAG smoke testing with real database boundaries and live provider keys (pending verification with real dependencies)
 
 ### Reliability
 
@@ -807,9 +828,6 @@ ai-cost-guardrail/
 │       ├── d0037b857ee4_add_usage_records.py
 │       └── f9540b35ac35_add_thinking_tokens_to_usage_records.py
 ├── alembic.ini
-├── ai_guardrail_backup.sql
-├── ai_guardrail_before_migration_repair.sql
-├── code-bundle.txt
 ├── docs/
 │   └── architecture_diagram.png
 ├── docker-compose.yml
@@ -832,7 +850,9 @@ ai-cost-guardrail/
 │   ├── test_ingestion.py
 │   ├── test_model_registry.py
 │   ├── test_pipeline.py
+│   ├── test_rag_accounting.py
 │   ├── test_rag_api.py
+│   ├── test_rag_budget.py
 │   ├── test_rag_schema.py
 │   ├── test_rag_schemas.py
 │   ├── test_retriever.py
@@ -861,6 +881,7 @@ ai-cost-guardrail/app/
 │   └── security.py
 ├── rag/
 │   ├── __init__.py
+│   ├── accounting.py
 │   ├── chunking.py
 │   ├── embeddings.py
 │   ├── generation.py
@@ -905,7 +926,6 @@ ai-cost-guardrail/app/
 
 ### Planned
 
-- Complete RAG accounting integration
 - RAG workload evaluation and hardening
 - Semantic caching
 - Background processing where justified
@@ -1007,7 +1027,7 @@ uv run pytest -q
 Expected current result:
 
 ```text
-184 passed
+278 passed
 ```
 
 ### Verbose tests
@@ -1183,13 +1203,11 @@ RAG evidence should be treated as untrusted input rather than model instructions
 
 ---
 
-## Current project direction
+## Design rationale
 
-The project is currently moving from a substantially complete **LLM gateway foundation** toward a **cost-controlled RAG gateway**.
+The RAG gateway integrates retrieval-augmented generation into the same durable accounting model used by the standard chat gateway path.
 
-The main engineering problem for the next phase is not simply generating an answer from retrieved documents. It is integrating the RAG workload into the same durable accounting model already used by the normal chat path.
-
-The intended lifecycle is:
+The implemented sequential lifecycle is:
 
 ```text
 1. Authenticate
@@ -1197,26 +1215,24 @@ The intended lifecycle is:
 3. Embed query
 4. Reserve embedding cost
 5. Retrieve tenant-safe evidence
-6. Build final generation prompt
-7. Count final generation input tokens
+6. Build final generation prompt with retrieved context
+7. Count final generation prompt tokens
 8. Reserve generation cost
-9. Generate through circuit breaker
-10. Read actual usage
-11. Settle embedding + generation usage
+9. Generate response through circuit breaker
+10. Read actual provider usage metadata
+11. Settle embedding and generation usage records
 12. Persist auditable usage records
 13. Return grounded response
 ```
 
-The critical design constraint is that the embedding and generation reservations are **sequential**, not one upfront batch, because the generation cost depends on the retrieved context.
-
-The project will continue to prioritize correctness, explicit boundaries, measurable trade-offs, and honest documentation of what is implemented versus what remains future work.
+The critical design constraint is that embedding and generation reservations are **sequential**, rather than a single upfront batch, because generation token counts and costs depend directly on the retrieved context passages.
 
 ---
 
 ## Status at the end of today's session
 
-**184 tests passing.**
+**278 tests passing.**
 
-The project now has the gateway accounting foundation, timeout handling, development-route isolation, operation-aware usage records, tenant-safe pgvector RAG storage, deterministic ingestion/chunking, exact retrieval, grounded generation, citation validation, and the `/api/v1/rag/query` API boundary.
+The project now has the gateway accounting foundation, timeout handling, development-route isolation, operation-aware usage records, tenant-safe pgvector RAG storage, deterministic ingestion/chunking, exact retrieval, grounded generation, citation validation, the `/api/v1/rag/query` API boundary, and end-to-end sequential RAG budget reservation and settlement without fabricated token counts.
 
-The next major milestone is **RAG cost/budget accounting**, especially propagating real embedding usage and reserving/settling embedding and generation operations without relying on fabricated token estimates.
+The next major milestone is real-provider/database smoke testing and hardening.

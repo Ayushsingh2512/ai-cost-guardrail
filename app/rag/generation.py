@@ -356,7 +356,15 @@ class GenerationService:
             raise GenerationProviderError("Failed to count prompt tokens") from exc
 
         total_tokens = getattr(response, "total_tokens", None)
-        return total_tokens or 0
+        if (
+            isinstance(total_tokens, bool)
+            or not isinstance(total_tokens, int)
+            or total_tokens < 0
+        ):
+            raise GenerationProviderError(
+                f"Generation provider returned invalid prompt token count: {total_tokens!r}"
+            )
+        return total_tokens
 
     def _parse_citations(
         self,
@@ -458,10 +466,18 @@ class GenerationService:
             None,
         )
 
-        if value is None:
+        if value is None or isinstance(value, bool):
             return None
 
-        return int(value)
+        try:
+            val_int = int(value)
+        except (TypeError, ValueError):
+            return None
+
+        if val_int < 0:
+            return None
+
+        return val_int
 
     @staticmethod
     def _extract_finish_reason(

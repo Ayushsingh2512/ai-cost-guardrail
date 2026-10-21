@@ -18,16 +18,14 @@ from __future__ import annotations
 
 import logging
 from decimal import Decimal
-from typing import TYPE_CHECKING
+from typing import TypeGuard
 
 from sqlalchemy.orm import Session
 
+from app.rag.generation import GenerationProviderError, ProviderMeta
 from app.services.cost_engine import cost_engine
 from app.services.models import UsageRecord
 from app.services.usage import usage_service
-
-if TYPE_CHECKING:
-    from app.rag.generation import ProviderMeta
 
 logger = logging.getLogger(__name__)
 
@@ -69,6 +67,7 @@ class RAGBudget:
 
         self._embed_record: UsageRecord | None = None
         self._generate_record: UsageRecord | None = None
+        self._preserve_generate_reservation: bool = False
 
     # ------------------------------------------------------------------
     # Public properties
@@ -81,6 +80,20 @@ class RAGBudget:
     @property
     def generate_record(self) -> UsageRecord | None:
         return self._generate_record
+
+    @property
+    def is_generation_preserved(self) -> bool:
+        """True if the generation reservation is preserved due to incomplete usage."""
+        return self._preserve_generate_reservation
+
+    def preserve_generation_reservation(self) -> None:
+        """Mark the generation reservation to be preserved rather than released on failure."""
+        self._preserve_generate_reservation = True
+
+    @staticmethod
+    def _is_valid_token_count(val: object) -> TypeGuard[int]:
+        """Accept only non-Boolean, non-negative integers."""
+        return isinstance(val, int) and not isinstance(val, bool) and val >= 0
 
     @property
     def total_cost(self) -> Decimal:
@@ -130,6 +143,12 @@ class RAGBudget:
         transaction (mirrors the chat.py error-recovery pattern).
         """
         assert self._embed_record is not None, "reserve_embedding must be called first"
+
+        if self._embed_record.status != "reserved":
+            raise RuntimeError(
+                f"Embedding reservation is in status {self._embed_record.status!r}; "
+                "cannot settle"
+            )
 
         actual_cost = cost_engine.calculate_embedding_cost(
             model=_EMBED_MODEL,
@@ -192,13 +211,17 @@ class RAGBudget:
             self.db.rollback()
             raise
 
-    def settle_generation(self, provider_meta: ProviderMeta) -> None:
+    def settle_generation(self, provider_meta: ProviderMeta | None) -> None:
         """
         Settle the generation reservation from provider-reported usage.
 
         Uses prompt_tokens, thinking_tokens, completion_tokens, and
-        total_tokens from ProviderMeta.  If total_tokens is None, computes
-        the sum of the three components.
+        total_tokens from ProviderMeta.
+
+        Validates required usage fields before normal generation settlement:
+        prompt_tokens and completion_tokens must be non-Boolean, non-negative integers.
+        Incomplete or missing usage metadata fails closed: preserves the reservation
+        to protect the tenant budget and raises GenerationProviderError.
 
         On DB failure: rollback, attempt settle_failure in a fresh
         transaction (mirrors the chat.py error-recovery pattern).
@@ -207,12 +230,59 @@ class RAGBudget:
             "reserve_generation must be called first"
         )
 
-        input_tokens = provider_meta.prompt_tokens or 0
-        thinking_tokens = provider_meta.thinking_tokens or 0
-        output_tokens = provider_meta.completion_tokens or 0
-        total_tokens = provider_meta.total_tokens
-        if total_tokens is None:
-            total_tokens = input_tokens + thinking_tokens + output_tokens
+        if self._generate_record.status != "reserved":
+            raise RuntimeError(
+                f"Generation reservation is in status {self._generate_record.status!r}; "
+                "cannot settle"
+            )
+
+        if provider_meta is None:
+            self._preserve_generate_reservation = True
+            raise GenerationProviderError(
+                "Generation provider returned no usage metadata; "
+                "reservation retained to protect tenant budget"
+            )
+
+        if not self._is_valid_token_count(provider_meta.prompt_tokens):
+            self._preserve_generate_reservation = True
+            raise GenerationProviderError(
+                f"Generation provider returned invalid or missing prompt_tokens: "
+                f"{provider_meta.prompt_tokens!r}; reservation retained to protect tenant budget"
+            )
+
+        if not self._is_valid_token_count(provider_meta.completion_tokens):
+            self._preserve_generate_reservation = True
+            raise GenerationProviderError(
+                f"Generation provider returned invalid or missing completion_tokens: "
+                f"{provider_meta.completion_tokens!r}; reservation retained to protect tenant budget"
+            )
+
+        if provider_meta.thinking_tokens is not None and not self._is_valid_token_count(
+            provider_meta.thinking_tokens
+        ):
+            self._preserve_generate_reservation = True
+            raise GenerationProviderError(
+                f"Generation provider returned invalid thinking_tokens: "
+                f"{provider_meta.thinking_tokens!r}; reservation retained to protect tenant budget"
+            )
+
+        if provider_meta.total_tokens is not None and not self._is_valid_token_count(
+            provider_meta.total_tokens
+        ):
+            self._preserve_generate_reservation = True
+            raise GenerationProviderError(
+                f"Generation provider returned invalid total_tokens: "
+                f"{provider_meta.total_tokens!r}; reservation retained to protect tenant budget"
+            )
+
+        input_tokens: int = provider_meta.prompt_tokens
+        thinking_tokens: int = provider_meta.thinking_tokens or 0
+        output_tokens: int = provider_meta.completion_tokens
+        total_tokens: int = (
+            provider_meta.total_tokens
+            if provider_meta.total_tokens is not None
+            else input_tokens + thinking_tokens + output_tokens
+        )
 
         model = self._generate_record.model
 
@@ -246,12 +316,17 @@ class RAGBudget:
 
     def release_all(self) -> None:
         """
-        Release every record that is still in 'reserved' status.
+        Release every record that is still in 'reserved' status,
+        except when a reservation is explicitly preserved to protect
+        the tenant budget on incomplete provider usage.
         Called on any exception path. NEVER raises — logs instead.
         """
         for record in (self._embed_record, self._generate_record):
-            if record is not None and record.status == "reserved":
-                self._try_release(record)
+            if record is None or record.status != "reserved":
+                continue
+            if record is self._generate_record and self._preserve_generate_reservation:
+                continue
+            self._try_release(record)
 
     # ------------------------------------------------------------------
     # Internal helpers

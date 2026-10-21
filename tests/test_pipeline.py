@@ -1,4 +1,4 @@
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from decimal import Decimal
 
 import pytest
@@ -34,6 +34,7 @@ class RecordingEmbedder:
     vector: list[float]
     calls: list[str]
     tokens: int = 10
+    count_tokens_calls: list[str] = field(default_factory=list)
 
     @property
     def fingerprint(self) -> str:
@@ -43,11 +44,22 @@ class RecordingEmbedder:
         self.calls.append(query)
         return self.vector
 
-    def embed_query_with_usage(self, query: str) -> EmbedResult:
+    def embed_query_with_usage(
+        self,
+        query: str,
+        *,
+        precomputed_tokens: int | None = None,
+    ) -> EmbedResult:
         vector = self.embed_query(query)
-        return EmbedResult(vector=vector, tokens=self.tokens)
+        tokens = (
+            precomputed_tokens
+            if precomputed_tokens is not None
+            else self.count_tokens(query)
+        )
+        return EmbedResult(vector=vector, tokens=tokens)
 
     def count_tokens(self, text: str) -> int:
+        self.count_tokens_calls.append(text)
         return self.tokens
 
 
@@ -82,10 +94,18 @@ class RecordingGenerator:
     result: GenerationResult
     calls: list[dict]
 
+    def build_prompt(self, query: str, passages) -> str:
+        return f"PROMPT: {query}"
+
+    async def count_prompt_tokens(self, prompt: str) -> int:
+        return 20
+
     async def generate(
         self,
         query: str,
         passages,
+        *,
+        prompt: str | None = None,
     ) -> GenerationResult:
         self.calls.append(
             {

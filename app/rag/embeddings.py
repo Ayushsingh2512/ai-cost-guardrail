@@ -153,18 +153,17 @@ class GeminiEmbedder:
 
         return vectors[0]
 
-    def embed_query_with_usage(self, query: str) -> EmbedResult:
+    def embed_query_with_usage(
+        self,
+        query: str,
+        *,
+        precomputed_tokens: int | None = None,
+    ) -> EmbedResult:
         self._validate_text(query)
-        try:
-            count = self.client.models.count_tokens(
-                model=self.config.model,
-                contents=query,
-            )
-        except Exception as exc:
-            raise EmbeddingProviderError(
-                "Embedding token counting is unavailable"
-            ) from exc
-        tokens = count.total_tokens or 0
+        if precomputed_tokens is not None:
+            tokens = precomputed_tokens
+        else:
+            tokens = self.count_tokens(query)
         vector = self.embed_query(query)  # reuse existing method
         return EmbedResult(vector=vector, tokens=tokens)
 
@@ -348,14 +347,14 @@ class GeminiEmbedder:
 
     def count_tokens(self, text: str) -> int:
         """
-        Return the token count for *text* as reported by the Gemini API.
+        Return the preflight token count for *text* as reported by the Gemini
+        count_tokens API.
 
-        If the provider rejects the call with an "unsupported model"-style
-        error, falls back to a conservative estimate: ceil(len(text) / 3).
-        All other provider failures (5xx, rate-limit) are retried with the
+        All provider failures (5xx, rate-limit) are retried with the
         same backoff used by _embed_batch and then re-raised as
         EmbeddingProviderError / EmbeddingRateLimitError.
         """
+        self._validate_text(text)
         last_error: Exception | None = None
 
         for attempt in range(self.config.max_retries + 1):
@@ -364,22 +363,26 @@ class GeminiEmbedder:
                     model=self.config.model,
                     contents=text,
                 )
-                return response.total_tokens or 0
+                tokens = getattr(response, "total_tokens", None)
+                if (
+                    isinstance(tokens, bool)
+                    or not isinstance(tokens, int)
+                    or tokens < 0
+                ):
+                    raise EmbeddingProviderError(
+                        "Embedding provider returned no token count"
+                    )
+                return tokens
+
+            except (
+                EmbeddingInputError,
+                EmbeddingProviderError,
+                EmbeddingRateLimitError,
+            ):
+                raise
 
             except Exception as exc:
                 last_error = exc
-
-                # Unsupported-model errors are not retryable; fall back.
-                if self._is_unsupported_model(exc):
-                    estimate = math.ceil(len(text) / 3)
-                    logger.warning(
-                        "count_tokens: model %r does not support token counting "
-                        "(%s); using character-based estimate of %d tokens",
-                        self.config.model,
-                        exc,
-                        estimate,
-                    )
-                    return estimate
 
                 code = getattr(exc, "code", None)
 
@@ -402,23 +405,6 @@ class GeminiEmbedder:
                 raise EmbeddingProviderError("Token counting request failed") from exc
 
         raise EmbeddingProviderError("Token counting failed") from last_error
-
-    @staticmethod
-    def _is_unsupported_model(exc: Exception) -> bool:
-        """
-        Return True when the provider error indicates the model does not
-        support the requested operation (e.g. count_tokens on an embedding
-        model).  We key on HTTP 400 *and* a message containing phrases like
-        "not supported", "unsupported", or "does not support".
-        """
-        code = getattr(exc, "code", None)
-        if code != 400:
-            return False
-        msg = str(exc).lower()
-        return any(
-            phrase in msg
-            for phrase in ("not supported", "unsupported", "does not support")
-        )
 
     @classmethod
     def from_env(
@@ -480,16 +466,22 @@ class FakeEmbedder:
     def embed_query_with_usage(
         self,
         query: str,
+        *,
+        precomputed_tokens: int | None = None,
     ) -> EmbedResult:
         vector = self.embed_query(query)
-        tokens = self.count_tokens(query)
+        tokens = (
+            precomputed_tokens
+            if precomputed_tokens is not None
+            else self.count_tokens(query)
+        )
         return EmbedResult(vector=vector, tokens=tokens)
 
     def count_tokens(self, text: str) -> int:
-        """Conservative character-based estimate (ceil(len / 3))."""
+        """Deterministic token count for tests based on word count."""
         if not isinstance(text, str) or not text.strip():
             raise EmbeddingInputError("Embedding input cannot be empty")
-        return math.ceil(len(text) / 3)
+        return max(1, len(text.split()))
 
     def _embed_text(
         self,

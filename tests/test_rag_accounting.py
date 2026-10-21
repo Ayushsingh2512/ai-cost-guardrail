@@ -34,6 +34,7 @@ class StubEmbedder:
         self.vector = vector or [0.1] * 768
         self.tokens = tokens
         self.calls = []
+        self.count_tokens_calls = []
 
     @property
     def fingerprint(self) -> str:
@@ -43,11 +44,22 @@ class StubEmbedder:
         self.calls.append(query)
         return self.vector
 
-    def embed_query_with_usage(self, query: str) -> EmbedResult:
+    def embed_query_with_usage(
+        self,
+        query: str,
+        *,
+        precomputed_tokens: int | None = None,
+    ) -> EmbedResult:
         self.calls.append(query)
-        return EmbedResult(vector=self.vector, tokens=self.tokens)
+        tokens = (
+            precomputed_tokens
+            if precomputed_tokens is not None
+            else self.count_tokens(query)
+        )
+        return EmbedResult(vector=self.vector, tokens=tokens)
 
     def count_tokens(self, text: str) -> int:
+        self.count_tokens_calls.append(text)
         return self.tokens
 
 
@@ -76,7 +88,19 @@ class StubGenerator:
             },
         )()
 
-    async def generate(self, query: str, passages) -> GenerationResult:
+    def build_prompt(self, query: str, passages) -> str:
+        return f"PROMPT: {query}"
+
+    async def count_prompt_tokens(self, prompt: str) -> int:
+        return self.prompt_tokens
+
+    async def generate(
+        self,
+        query: str,
+        passages,
+        *,
+        prompt: str | None = None,
+    ) -> GenerationResult:
         if self.result is not None:
             return self.result
         return GenerationResult(
@@ -97,9 +121,6 @@ class StubGenerator:
                 total_tokens=45,
             ),
         )
-
-    async def count_prompt_tokens(self, query: str, passages) -> int:
-        return self.prompt_tokens
 
 
 @pytest.fixture
@@ -370,9 +391,13 @@ async def test_pipeline_with_budget_blocked_with_meta_settles(
 
 
 @pytest.mark.asyncio
-async def test_pipeline_with_budget_blocked_without_meta_releases(
+async def test_pipeline_with_budget_blocked_without_meta_preserves_reservation(
     db, test_tenant, test_user
 ):
+    """
+    When generation succeeds/blocks but has no provider metadata, it must not
+    silently release the reservation. It must fail closed and preserve the reservation.
+    """
     embedder = StubEmbedder(tokens=8)
     retriever = StubRetriever()
     generator = StubGenerator(
@@ -400,17 +425,21 @@ async def test_pipeline_with_budget_blocked_without_meta_releases(
         request_id=str(uuid4()),
     )
 
-    answer = await service.answer(
-        tenant_id=test_tenant.id,
-        query="Blocked query without meta",
-        budget=budget,
-    )
+    with pytest.raises(GenerationProviderError, match="no usage metadata"):
+        await service.answer(
+            tenant_id=test_tenant.id,
+            query="Blocked query without meta",
+            budget=budget,
+        )
 
-    assert answer.generation.status == "blocked"
+    db.refresh(test_tenant)
     assert budget.embed_record.status == "completed"
-    assert budget.generate_record.status == "failed"
-    assert budget.generate_record.actual_cost == Decimal(0)
-    assert answer.total_cost == budget.embed_record.actual_cost
+    assert budget.generate_record.status == "reserved"
+    assert budget.is_generation_preserved is True
+    expected_spend = (
+        budget.embed_record.actual_cost + budget.generate_record.reserved_cost
+    )
+    assert test_tenant.current_spend == expected_spend
 
 
 @pytest.mark.asyncio
@@ -421,7 +450,7 @@ async def test_pipeline_with_budget_generation_error_releases_all(
     retriever = StubRetriever()
 
     class FailingGenerator(StubGenerator):
-        async def generate(self, query, passages):
+        async def generate(self, query, passages, *, prompt=None):
             raise GenerationProviderError("LLM exploded")
 
     service = RAGService(
@@ -667,3 +696,334 @@ def test_rag_route_success_returns_request_id_and_total_cost(
     assert "total_cost" in data
     # In JSON, Pydantic encodes Decimal as string
     assert Decimal(str(data["total_cost"])) > Decimal(0)
+
+
+@pytest.mark.asyncio
+async def test_pipeline_reserves_embedding_before_calling_embedder(
+    db, test_tenant, test_user
+):
+    """Verifies that budget reservation occurs before the embedder is invoked."""
+    events: list[str] = []
+
+    class OrderEmbedder(StubEmbedder):
+        def count_tokens(self, text: str) -> int:
+            events.append("count_tokens")
+            return 14
+
+        def embed_query_with_usage(
+            self, query: str, *, precomputed_tokens: int | None = None
+        ) -> EmbedResult:
+            events.append("embed_query_with_usage")
+            return super().embed_query_with_usage(
+                query, precomputed_tokens=precomputed_tokens
+            )
+
+    budget = RAGBudget(
+        db=db,
+        tenant_id=test_tenant.id,
+        user_id=test_user.id,
+        request_id=str(uuid4()),
+    )
+    real_reserve = budget.reserve_embedding
+
+    def tracked_reserve(query_tokens: int) -> None:
+        events.append("reserve_embedding")
+        real_reserve(query_tokens)
+
+    budget.reserve_embedding = tracked_reserve  # type: ignore[method-assign]
+
+    service = RAGService(
+        embedder=OrderEmbedder(tokens=14),
+        retriever=StubRetriever(),
+        generator=StubGenerator(),
+    )
+
+    await service.answer(
+        tenant_id=test_tenant.id,
+        query="Order check query",
+        budget=budget,
+    )
+
+    assert events[:3] == [
+        "count_tokens",
+        "reserve_embedding",
+        "embed_query_with_usage",
+    ]
+
+
+@pytest.mark.asyncio
+async def test_pipeline_reuses_same_preflight_count_for_reservation_and_settlement(
+    db, test_tenant, test_user
+):
+    """Verifies that the exact same preflight token count is used to reserve and settle embedding."""
+    embedder = StubEmbedder(tokens=15)
+    service = RAGService(
+        embedder=embedder,
+        retriever=StubRetriever(),
+        generator=StubGenerator(),
+    )
+    budget = RAGBudget(
+        db=db,
+        tenant_id=test_tenant.id,
+        user_id=test_user.id,
+        request_id=str(uuid4()),
+    )
+
+    await service.answer(
+        tenant_id=test_tenant.id,
+        query="Query for token reuse test",
+        budget=budget,
+    )
+
+    assert len(embedder.count_tokens_calls) == 1
+    assert budget.embed_record is not None
+    assert budget.embed_record.input_tokens == 15
+    assert budget.embed_record.total_tokens == 15
+    assert budget.embed_record.status == "completed"
+    # Reserved cost and actual cost are equal because the exact same token count (15) was used
+    assert budget.embed_record.reserved_cost == budget.embed_record.actual_cost
+
+
+def test_settle_generation_rejects_none_metadata_and_preserves_reservation(
+    db, test_tenant, test_user
+):
+    """settle_generation(None) raises GenerationProviderError and preserves the reservation."""
+    budget = RAGBudget(
+        db=db,
+        tenant_id=test_tenant.id,
+        user_id=test_user.id,
+        request_id=str(uuid4()),
+    )
+    budget.reserve_generation(
+        prompt_tokens=40,
+        max_output_tokens=2000,
+        model=DEFAULT_GENERATION_MODEL,
+    )
+    initial_spend = test_tenant.current_spend
+    assert initial_spend > Decimal(0)
+    assert budget.generate_record is not None
+    assert budget.generate_record.status == "reserved"
+
+    with pytest.raises(GenerationProviderError, match="no usage metadata"):
+        budget.settle_generation(None)
+
+    assert budget.is_generation_preserved is True
+    # The record remains in 'reserved' status and spend is not released
+    db.refresh(test_tenant)
+    assert budget.generate_record.status == "reserved"
+    assert test_tenant.current_spend == initial_spend
+    assert budget.total_cost == Decimal(0)
+
+    # Calling release_all does not release the preserved reservation
+    budget.release_all()
+    db.refresh(test_tenant)
+    assert budget.generate_record.status == "reserved"
+    assert test_tenant.current_spend == initial_spend
+
+
+@pytest.mark.parametrize(
+    "invalid_prompt_tokens",
+    [
+        None,
+        True,
+        False,
+        "50",
+        2.5,
+        -1,
+        -10,
+    ],
+)
+def test_settle_generation_rejects_invalid_prompt_tokens_and_preserves_reservation(
+    db, test_tenant, test_user, invalid_prompt_tokens
+):
+    """Invalid or missing prompt_tokens raises GenerationProviderError and preserves the reservation."""
+    budget = RAGBudget(
+        db=db,
+        tenant_id=test_tenant.id,
+        user_id=test_user.id,
+        request_id=str(uuid4()),
+    )
+    budget.reserve_generation(
+        prompt_tokens=40,
+        max_output_tokens=2000,
+        model=DEFAULT_GENERATION_MODEL,
+    )
+    initial_spend = test_tenant.current_spend
+
+    meta = ProviderMeta(
+        provider="gemini",
+        model=DEFAULT_GENERATION_MODEL,
+        prompt_tokens=invalid_prompt_tokens,  # type: ignore[arg-type]
+        completion_tokens=20,
+        latency_ms=100,
+    )
+
+    with pytest.raises(GenerationProviderError, match="prompt_tokens"):
+        budget.settle_generation(meta)
+
+    assert budget.is_generation_preserved is True
+    db.refresh(test_tenant)
+    assert budget.generate_record.status == "reserved"
+    assert test_tenant.current_spend == initial_spend
+
+    # release_all preserves it
+    budget.release_all()
+    db.refresh(test_tenant)
+    assert budget.generate_record.status == "reserved"
+    assert test_tenant.current_spend == initial_spend
+
+
+@pytest.mark.parametrize(
+    "invalid_completion_tokens",
+    [
+        None,
+        True,
+        False,
+        "20",
+        2.5,
+        -1,
+        -10,
+    ],
+)
+def test_settle_generation_rejects_invalid_completion_tokens_and_preserves_reservation(
+    db, test_tenant, test_user, invalid_completion_tokens
+):
+    """Invalid or missing completion_tokens raises GenerationProviderError and preserves the reservation."""
+    budget = RAGBudget(
+        db=db,
+        tenant_id=test_tenant.id,
+        user_id=test_user.id,
+        request_id=str(uuid4()),
+    )
+    budget.reserve_generation(
+        prompt_tokens=40,
+        max_output_tokens=2000,
+        model=DEFAULT_GENERATION_MODEL,
+    )
+    initial_spend = test_tenant.current_spend
+
+    meta = ProviderMeta(
+        provider="gemini",
+        model=DEFAULT_GENERATION_MODEL,
+        prompt_tokens=40,
+        completion_tokens=invalid_completion_tokens,  # type: ignore[arg-type]
+        latency_ms=100,
+    )
+
+    with pytest.raises(GenerationProviderError, match="completion_tokens"):
+        budget.settle_generation(meta)
+
+    assert budget.is_generation_preserved is True
+    db.refresh(test_tenant)
+    assert budget.generate_record.status == "reserved"
+    assert test_tenant.current_spend == initial_spend
+
+
+def test_settle_generation_cannot_double_settle(db, test_tenant, test_user):
+    """Calling settle_generation twice raises RuntimeError to prevent double settlement."""
+    budget = RAGBudget(
+        db=db,
+        tenant_id=test_tenant.id,
+        user_id=test_user.id,
+        request_id=str(uuid4()),
+    )
+    budget.reserve_generation(
+        prompt_tokens=40,
+        max_output_tokens=2000,
+        model=DEFAULT_GENERATION_MODEL,
+    )
+    meta = ProviderMeta(
+        provider="gemini",
+        model=DEFAULT_GENERATION_MODEL,
+        prompt_tokens=40,
+        completion_tokens=20,
+        latency_ms=100,
+    )
+    budget.settle_generation(meta)
+    assert budget.generate_record.status == "completed"
+
+    with pytest.raises(RuntimeError, match="cannot settle"):
+        budget.settle_generation(meta)
+
+
+# ---------------------------------------------------------------------------
+# release_all — double-refund safety regression test
+# ---------------------------------------------------------------------------
+
+
+def test_release_all_preserves_completed_embed_and_reserved_generate(
+    db, test_tenant, test_user
+):
+    """
+    7-step sequence verifying release_all double-refund safety.
+
+    Step 1  reserve_embedding
+    Step 2  settle_embedding   → embed_record becomes 'completed'
+    Step 3  reserve_generation
+    Step 4  settle_generation with invalid completion_tokens (None)
+            → GenerationProviderError, _preserve_generate_reservation = True
+    Step 5  release_all
+            → embed_record must NOT be released again (already completed)
+            → generate_record must NOT be released (preserved flag)
+    Step 6  assert embed_record.status == 'completed'
+    Step 7  assert generate_record.status == 'reserved'
+    """
+    budget = RAGBudget(
+        db=db,
+        tenant_id=test_tenant.id,
+        user_id=test_user.id,
+        request_id=str(uuid4()),
+    )
+
+    # Step 1 — reserve embedding
+    budget.reserve_embedding(query_tokens=20)
+    assert budget.embed_record is not None
+    assert budget.embed_record.status == "reserved"
+
+    # Step 2 — settle embedding successfully
+    budget.settle_embedding(tokens=20)
+    db.refresh(test_tenant)
+    assert budget.embed_record.status == "completed"
+    spend_after_embed = test_tenant.current_spend
+
+    # Step 3 — reserve generation
+    budget.reserve_generation(
+        prompt_tokens=40,
+        max_output_tokens=2000,
+        model=DEFAULT_GENERATION_MODEL,
+    )
+    assert budget.generate_record is not None
+    assert budget.generate_record.status == "reserved"
+    db.refresh(test_tenant)
+    spend_after_gen_reserve = test_tenant.current_spend
+
+    # Step 4 — settle generation with missing completion_tokens → preserved
+    bad_meta = ProviderMeta(
+        provider="gemini",
+        model=DEFAULT_GENERATION_MODEL,
+        prompt_tokens=40,
+        completion_tokens=None,  # type: ignore[arg-type]
+        latency_ms=100,
+    )
+    with pytest.raises(GenerationProviderError, match="completion_tokens"):
+        budget.settle_generation(bad_meta)
+
+    assert budget.is_generation_preserved is True
+    assert budget.generate_record.status == "reserved"
+
+    # Step 5 — release_all (simulates exception handler in pipeline)
+    budget.release_all()
+
+    # Step 6 — embed_record must remain 'completed', not double-released
+    db.refresh(budget.embed_record)
+    assert budget.embed_record.status == "completed"
+
+    # Step 7 — generate_record must remain 'reserved', not released (preserved)
+    db.refresh(budget.generate_record)
+    assert budget.generate_record.status == "reserved"
+
+    # The tenant's current_spend must not have shrunk below post-embed level
+    db.refresh(test_tenant)
+    assert test_tenant.current_spend >= spend_after_embed
+    # The generation reservation cost is still reflected in current_spend
+    assert test_tenant.current_spend == spend_after_gen_reserve

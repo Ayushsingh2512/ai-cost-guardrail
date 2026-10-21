@@ -345,6 +345,7 @@ class StubCountTokensClient:
         dims: int = 2,
     ):
         self.ct_calls: list = []
+        self.count_tokens_calls = self.ct_calls
         self.ct_script = list(ct_script or [])
         self.ct_tokens = ct_tokens
         self.dims = dims
@@ -430,10 +431,10 @@ def test_count_tokens_rate_limit_exhausted_raises():
     assert len(client.ct_calls) == 3
 
 
-def test_count_tokens_unsupported_model_falls_back_to_estimate(caplog):
+def test_count_tokens_unsupported_model_raises_without_fallback():
     """
-    A 400 error with 'unsupported' in the message triggers the fallback path.
-    The fallback returns ceil(len(text) / 3) and logs a warning.
+    A 400 error with 'unsupported' in the message raises EmbeddingProviderError
+    immediately without fallback to character estimation or retry.
     """
 
     class UnsupportedModelError(Exception):
@@ -447,19 +448,73 @@ def test_count_tokens_unsupported_model_falls_back_to_estimate(caplog):
     )
     embedder = make_ct(client)
 
-    text = "hello world!"  # 12 chars -> ceil(12/3) = 4
-    import math
+    with pytest.raises(EmbeddingProviderError):
+        embedder.count_tokens("hello world!")
 
-    expected = math.ceil(len(text) / 3)
-
-    import logging
-
-    with caplog.at_level(logging.WARNING, logger="app.rag.embeddings"):
-        result = embedder.count_tokens(text)
-
-    assert result == expected
     assert len(client.ct_calls) == 1  # no retry on unsupported model
-    assert any("estimate" in r.message for r in caplog.records)
+
+
+def test_count_tokens_empty_input_raises_for_gemini_embedder():
+    """
+    GeminiEmbedder.count_tokens raises EmbeddingInputError on empty or whitespace-only input
+    before making any API calls.
+    """
+    client = StubCountTokensClient()
+    embedder = make_ct(client)
+
+    with pytest.raises(EmbeddingInputError):
+        embedder.count_tokens("")
+
+    with pytest.raises(EmbeddingInputError):
+        embedder.count_tokens("   ")
+
+    assert len(client.ct_calls) == 0
+
+
+def test_count_tokens_missing_total_tokens_raises():
+    """When the provider returns no total_tokens, EmbeddingProviderError is raised (no zero return)."""
+    client = StubCountTokensClient(ct_tokens=None)  # type: ignore[arg-type]
+    embedder = make_ct(client)
+
+    with pytest.raises(EmbeddingProviderError, match="no token count"):
+        embedder.count_tokens("hello")
+
+
+@pytest.mark.parametrize(
+    "invalid_tokens",
+    [
+        None,
+        True,
+        False,
+        "2",
+        2.0,
+        -1,
+        -10,
+    ],
+)
+def test_count_tokens_invalid_or_missing_tokens_raises(invalid_tokens):
+    """
+    In GeminiEmbedder.count_tokens(), accept only a non-Boolean, non-negative integer.
+    None, Boolean, strings, floats, and negative integers raise EmbeddingProviderError
+    immediately without retrying.
+    """
+    client = StubCountTokensClient(ct_tokens=invalid_tokens)  # type: ignore[arg-type]
+    embedder = make_ct(client)
+
+    with pytest.raises(EmbeddingProviderError, match="no token count"):
+        embedder.count_tokens("hello")
+
+    # Raised on first attempt; invalid payload does not waste retries.
+    assert len(client.ct_calls) == 1
+
+
+def test_count_tokens_zero_is_valid():
+    """Zero is a valid non-negative integer token count."""
+    client = StubCountTokensClient(ct_tokens=0)
+    embedder = make_ct(client)
+
+    assert embedder.count_tokens("hello") == 0
+    assert len(client.ct_calls) == 1
 
 
 def test_count_tokens_empty_input_raises_for_fake_embedder():
@@ -498,10 +553,19 @@ def test_gemini_embed_query_with_usage_count_tokens_failure_raises():
     client = StubCountTokensClient(ct_script=[RuntimeError("count failed")])
     embedder = make_ct(client)
 
-    with pytest.raises(
-        EmbeddingProviderError, match="Embedding token counting is unavailable"
-    ):
+    with pytest.raises(EmbeddingProviderError):
         embedder.embed_query_with_usage("search query")
+
+
+def test_gemini_embed_query_with_usage_uses_precomputed_tokens():
+    """When precomputed_tokens is provided, count_tokens is bypassed."""
+    client = StubCountTokensClient(ct_tokens=42)
+    embedder = make_ct(client)
+
+    res = embedder.embed_query_with_usage("search query", precomputed_tokens=99)
+
+    assert res.tokens == 99
+    assert len(client.ct_calls) == 0  # bypassed count_tokens API call
 
 
 def test_fake_embedder_embed_query_with_usage_deterministic():

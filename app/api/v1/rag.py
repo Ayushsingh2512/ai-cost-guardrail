@@ -13,6 +13,7 @@ from app.rag.embeddings import (
 )
 from app.rag.generation import (
     GenerationError,
+    GenerationProviderError,
     GenerationRateLimitError,
     GenerationTimeoutError,
     generation_service,
@@ -98,6 +99,20 @@ async def rag_query(
     except GenerationTimeoutError as exc:
         raise HTTPException(
             status_code=504,
+            detail=str(exc),
+        ) from exc
+    except GenerationProviderError as exc:
+        if "count_prompt_tokens" in str(exc):
+            raise HTTPException(
+                status_code=500,
+                detail=(
+                    "Server misconfiguration: generation service "
+                    "is not configured for budget accounting"
+                ),
+            ) from exc
+
+        raise HTTPException(
+            status_code=502,
             detail=str(exc),
         ) from exc
     except (EmbeddingError, GenerationError) as exc:

@@ -17,6 +17,7 @@ from app.rag.generation import (
 if TYPE_CHECKING:
     from app.rag.accounting import RAGBudget
 
+
 MAX_QUERY_LENGTH = 4000
 MIN_TOP_K = 1
 MAX_TOP_K = 20
@@ -28,7 +29,12 @@ class Embedder(Protocol):
 
     def embed_query(self, query: str) -> list[float]: ...
 
-    def embed_query_with_usage(self, query: str) -> EmbedResult: ...
+    def embed_query_with_usage(
+        self,
+        query: str,
+        *,
+        precomputed_tokens: int | None = None,
+    ) -> EmbedResult: ...
 
     def count_tokens(self, text: str) -> int: ...
 
@@ -46,10 +52,20 @@ class Retriever(Protocol):
 
 
 class Generator(Protocol):
+    def build_prompt(
+        self,
+        query: str,
+        passages: Sequence[ContextPassage],
+    ) -> str: ...
+
+    async def count_prompt_tokens(self, prompt: str, /) -> int: ...
+
     async def generate(
         self,
         query: str,
         passages: Sequence[ContextPassage],
+        *,
+        prompt: str | None = None,
     ) -> GenerationResult: ...
 
 
@@ -86,33 +102,48 @@ class RAGService:
         self._validate_top_k(top_k)
 
         try:
+            query_tokens: int | None = None
+            embedding_tokens: int | None = None
+
             if budget is not None:
-                query_tokens = self.embedder.count_tokens(query)
+                # Count before the embedding request so the reservation
+                # is committed before any embedding provider call.
+                query_tokens = await asyncio.to_thread(
+                    self.embedder.count_tokens,
+                    query,
+                )
                 budget.reserve_embedding(query_tokens)
 
-            embed_started = time.monotonic()
-            if hasattr(self.embedder, "embed_query_with_usage"):
-                embed_res = await asyncio.to_thread(
+                embed_started = time.monotonic()
+                embed_result = await asyncio.to_thread(
                     self.embedder.embed_query_with_usage,
                     query,
+                    precomputed_tokens=query_tokens,
                 )
-                vector = embed_res.vector
-                embedding_tokens = embed_res.tokens
+                embed_ms = int((time.monotonic() - embed_started) * 1000)
+                vector = embed_result.vector
+                embedding_tokens = query_tokens
+                budget.settle_embedding(query_tokens)
             else:
-                vector = await asyncio.to_thread(
-                    self.embedder.embed_query,
-                    query,
-                )
-                embedding_tokens = None
-            embed_ms = int((time.monotonic() - embed_started) * 1000)
+                embed_started = time.monotonic()
+                if hasattr(self.embedder, "embed_query_with_usage"):
+                    embed_result = await asyncio.to_thread(
+                        self.embedder.embed_query_with_usage,
+                        query,
+                    )
+                    vector = embed_result.vector
+                    embedding_tokens = embed_result.tokens
+                else:
+                    vector = await asyncio.to_thread(
+                        self.embedder.embed_query,
+                        query,
+                    )
+                    embedding_tokens = None
+                embed_ms = int((time.monotonic() - embed_started) * 1000)
 
-            if budget is not None:
-                settle_tokens = (
-                    embedding_tokens if embedding_tokens is not None else query_tokens
-                )
-                budget.settle_embedding(settle_tokens)
-
+            # Retrieve only after embedding has been settled.
             retrieve_started = time.monotonic()
+
             passages = await asyncio.to_thread(
                 self.retriever.search,
                 tenant_id=tenant_id,
@@ -120,54 +151,82 @@ class RAGService:
                 k=top_k,
                 fingerprint=self.embedder.fingerprint,
             )
+
             retrieve_ms = int((time.monotonic() - retrieve_started) * 1000)
 
             has_reserved_gen = False
+            prompt: str | None = None
+
+            # Generation cost depends on the prompt that includes
+            # retrieved evidence, so reserve it only after retrieval.
             if budget is not None and passages:
-                # Generation cost requires a real prompt-token count.
-                # Never fabricate — if the count is unavailable, skip the
-                # generation reservation entirely rather than guessing.
-                if not hasattr(self.generator, "count_prompt_tokens"):
+                if not callable(getattr(self.generator, "count_prompt_tokens", None)):
                     raise GenerationProviderError(
                         "GenerationService does not expose count_prompt_tokens; "
                         "cannot reserve generation cost without a real token count"
                     )
-                prompt_tokens = await self.generator.count_prompt_tokens(
-                    query, passages
+
+                if not callable(getattr(self.generator, "build_prompt", None)):
+                    raise GenerationProviderError(
+                        "GenerationService does not expose build_prompt; "
+                        "cannot construct prompt for budget accounting"
+                    )
+
+                prompt = self.generator.build_prompt(
+                    query,
+                    passages,
                 )
+
+                prompt_tokens = await self.generator.count_prompt_tokens(prompt)
+
+                config = getattr(self.generator, "config", None)
+
                 model = getattr(
-                    getattr(self.generator, "config", None),
+                    config,
                     "model",
                     "gemini-3-flash-preview",
                 )
+
                 max_output_tokens = getattr(
-                    getattr(self.generator, "config", None),
+                    config,
                     "max_output_tokens",
                     2000,
                 )
+
                 budget.reserve_generation(
                     prompt_tokens=prompt_tokens,
                     max_output_tokens=max_output_tokens,
                     model=model,
                 )
+
                 has_reserved_gen = True
 
+            # Keep this call unconditional. For empty passages, the
+            # generator should return "no_context" without an LLM call.
             generate_started = time.monotonic()
-            generation = await self.generator.generate(
-                query,
-                passages,
-            )
+
+            if has_reserved_gen:
+                generation = await self.generator.generate(
+                    query,
+                    passages,
+                    prompt=prompt,
+                )
+            else:
+                generation = await self.generator.generate(
+                    query,
+                    passages,
+                )
+
             generate_ms = int((time.monotonic() - generate_started) * 1000)
 
             if budget is not None and has_reserved_gen:
-                if generation.status == "blocked" and generation.provider is None:
-                    budget.release_all()
-                elif generation.provider is not None:
-                    budget.settle_generation(generation.provider)
-                else:
-                    budget.release_all()
+                # Settle generation reservation using provider usage metadata.
+                # Incomplete or missing usage fails closed: preserves the
+                # reservation to protect tenant budget and raises GenerationProviderError.
+                budget.settle_generation(generation.provider)
 
             total_cost = budget.total_cost if budget is not None else Decimal(0)
+
             request_id = budget.request_id if budget is not None else None
 
             return RAGAnswer(

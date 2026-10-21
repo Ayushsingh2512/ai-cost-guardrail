@@ -743,12 +743,45 @@ async def test_count_prompt_tokens_with_query_and_passages(passages):
 
 
 @pytest.mark.asyncio
-async def test_count_prompt_tokens_returns_zero_when_total_tokens_none():
-    """total_tokens=None in the response is normalised to 0."""
+@pytest.mark.parametrize(
+    "invalid_tokens",
+    [
+        None,
+        True,
+        False,
+        "5",
+        2.5,
+        -1,
+        -10,
+    ],
+)
+async def test_count_prompt_tokens_invalid_or_missing_total_tokens_raises(
+    invalid_tokens,
+):
+    """
+    total_tokens that is missing (None), Boolean, non-integer, or negative
+    must not silently become zero; it must raise GenerationProviderError.
+    """
     client = SimpleNamespace(
         aio=SimpleNamespace(
             models=FakeModelsWithCounting(
-                ct_response=SimpleNamespace(total_tokens=None),
+                ct_response=SimpleNamespace(total_tokens=invalid_tokens),
+            )
+        )
+    )
+    service = GenerationService(client=client)
+
+    with pytest.raises(GenerationProviderError, match="invalid prompt token count"):
+        await service.count_prompt_tokens("x")
+
+
+@pytest.mark.asyncio
+async def test_count_prompt_tokens_zero_tokens_is_valid():
+    """Zero is a valid non-negative integer token count."""
+    client = SimpleNamespace(
+        aio=SimpleNamespace(
+            models=FakeModelsWithCounting(
+                ct_response=SimpleNamespace(total_tokens=0),
             )
         )
     )
