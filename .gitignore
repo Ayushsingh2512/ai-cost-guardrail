@@ -29,3 +29,5 @@ coverage.xml
 .idea/
 *.sql
 code-bundle.txt
+
+.freebuff/
