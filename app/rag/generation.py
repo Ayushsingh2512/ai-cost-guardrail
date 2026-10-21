@@ -113,6 +113,8 @@ class ProviderMeta:
     completion_tokens: int | None
     latency_ms: int
     request_id: str | None = None
+    thinking_tokens: int | None = None
+    total_tokens: int | None = None
 
 
 @dataclass(frozen=True)
@@ -190,6 +192,8 @@ class GenerationService:
         self,
         query: str,
         passages: Sequence[ContextPassage],
+        *,
+        prompt: str | None = None,
     ) -> GenerationResult:
         """
         Generate an answer grounded only in the supplied passages.
@@ -197,6 +201,9 @@ class GenerationService:
         Empty context short-circuits without making an LLM call.
         Provider failures raise GenerationError subclasses.
         Safety-blocked responses are returned as status='blocked'.
+
+        Pass a pre-built *prompt* to avoid rebuilding it when the caller
+        already counted its tokens (e.g. for budget reservation).
         """
         self._validate_query(query)
 
@@ -218,10 +225,11 @@ class GenerationService:
                 provider=None,
             )
 
-        prompt = self._build_prompt(
-            query=query,
-            passages=passages,
-        )
+        if prompt is None:
+            prompt = self.build_prompt(
+                query=query,
+                passages=passages,
+            )
 
         started_at = time.monotonic()
 
@@ -292,11 +300,12 @@ class GenerationService:
             provider=provider_meta,
         )
 
-    def _build_prompt(
+    def build_prompt(
         self,
         query: str,
         passages: Sequence[ContextPassage],
     ) -> str:
+        """Build the grounded prompt string from a query and evidence passages."""
         evidence_blocks: list[str] = []
 
         for index, passage in enumerate(passages, start=1):
@@ -305,6 +314,41 @@ class GenerationService:
         evidence = "\n\n".join(evidence_blocks)
 
         return f"EVIDENCE\n=======\n{evidence}\n\nQUESTION\n========\n{query.strip()}"
+
+    def _build_prompt(
+        self,
+        query: str,
+        passages: Sequence[ContextPassage],
+    ) -> str:
+        """Private alias kept for backward compatibility; delegates to build_prompt."""
+        return self.build_prompt(query=query, passages=passages)
+
+    async def count_prompt_tokens(self, prompt: str) -> int:
+        """
+        Count the billable input tokens for *prompt* as the model would see
+        them, including the SYSTEM_INSTRUCTION that generate_content always
+        sends.
+
+        A single count_tokens call is made, passing system_instruction via
+        CountTokensConfig so the system instruction tokens are included in
+        the same request rather than a second separate call.
+        (CountTokensConfig.system_instruction was confirmed present in the
+        installed SDK version.)
+
+        Returns the total_tokens value from the response (int, ≥ 0).
+        """
+        try:
+            response = await self.client.aio.models.count_tokens(
+                model=self.config.model,
+                contents=prompt,
+                config=types.CountTokensConfig(
+                    system_instruction=SYSTEM_INSTRUCTION,
+                ),
+            )
+        except Exception as exc:
+            raise self._map_provider_exception(exc) from exc
+
+        return response.total_tokens or 0
 
     def _parse_citations(
         self,
@@ -362,6 +406,16 @@ class GenerationService:
             "candidates_token_count",
         )
 
+        thinking_tokens = self._get_optional_int(
+            usage,
+            "thoughts_token_count",
+        )
+
+        total_tokens = self._get_optional_int(
+            usage,
+            "total_token_count",
+        )
+
         request_id = getattr(
             response,
             "response_id",
@@ -378,6 +432,8 @@ class GenerationService:
             completion_tokens=completion_tokens,
             latency_ms=latency_ms,
             request_id=request_id,
+            thinking_tokens=thinking_tokens,
+            total_tokens=total_tokens,
         )
 
     @staticmethod
