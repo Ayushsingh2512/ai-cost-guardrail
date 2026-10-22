@@ -495,13 +495,15 @@ The endpoint is intentionally separated from `/api/v1/chat`.
 
 The API returns a structured response containing:
 
-- request status
-- generated answer
-- validated citations
-- requested `top_k`
-- retrieved passage count
-- stage timings
-- embedding token count when available
+- `status` — request outcome: `"answered"`, `"no_context"`, or `"blocked"`
+- `answer` — the grounded response text, or `null` when status is not `"answered"`
+- `citations` — validated passage references used to ground the answer
+- `top_k` — number of passages requested
+- `retrieved_count` — number of passages actually retrieved
+- `timings_ms` — per-stage wall-clock timings in milliseconds
+- `embedding_tokens` — preflight query token count obtained through Gemini `count_tokens`, reserved before the embedding call and settled into the usage ledger; `null` if no budget was attached
+- `request_id` — UUID that correlates this RAG request with its `embed` and `generate` usage records in the ledger
+- `total_cost` — total accounted cost for the request (embedding + generation) as a decimal string; `"0.000000"` when no budget was attached
 
 Example shape:
 
@@ -524,11 +526,15 @@ Example shape:
     "generation": 140,
     "total": 160
   },
-  "embedding_tokens": 42
+  "embedding_tokens": 42,
+  "request_id": "3fa85f64-5717-4562-b3fc-2c963f66afa6",
+  "total_cost": "0.000312"
 }
 ```
 
-`embedding_tokens` reflects the preflight input token count returned by Gemini `count_tokens`, which is reserved before the embedding call and settled into the ledger.
+`total_cost` is serialized as a JSON string by Pydantic v2's default `Decimal` serializer. Its value represents the total accounted cost for the request using the database's six-decimal monetary precision.
+
+`embedding_tokens` reflects the preflight input token count returned by Gemini's `count_tokens` API. It is reserved before the embedding call and then settled into the usage ledger.
 
 ---
 
@@ -1231,7 +1237,7 @@ The critical design constraint is that embedding and generation reservations are
 
 ## Status at the end of today's session
 
-**278 tests passing.**
+**279 tests passing.**
 
 The project now has the gateway accounting foundation, timeout handling, development-route isolation, operation-aware usage records, tenant-safe pgvector RAG storage, deterministic ingestion/chunking, exact retrieval, grounded generation, citation validation, the `/api/v1/rag/query` API boundary, and end-to-end sequential RAG budget reservation and settlement without fabricated token counts.
 
