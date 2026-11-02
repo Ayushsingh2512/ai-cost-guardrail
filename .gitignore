@@ -34,3 +34,14 @@ code-bundle.txt
 code-bundle.txt
 *.sql
 .freebuff/
+.neon
+node_modules/
+
+# RAG evaluation generated reports (committed datasets stay; results do not)
+evals/results/
+# Ignore generated bundle and accidental Node files
+project_bundle.txt
+package.json
+package-lock.json
+neon.ts
+node_modules/

@@ -1242,3 +1242,102 @@ The critical design constraint is that embedding and generation reservations are
 The project now has the gateway accounting foundation, timeout handling, development-route isolation, operation-aware usage records, tenant-safe pgvector RAG storage, deterministic ingestion/chunking, exact retrieval, grounded generation, citation validation, the `/api/v1/rag/query` API boundary, and end-to-end sequential RAG budget reservation and settlement without fabricated token counts.
 
 The next major milestone is real-provider/database smoke testing and hardening.
+
+---
+
+## RAG Evaluation
+
+> **Pass 1 (complete):** retrieval metrics (Recall@5), abstention metrics, latency/cost capture, JSON report, deterministic tests.
+> **Pass 1.5 (complete):** corpus hardening with distractors (~50 chunks), ranking metrics (Recall@1, Recall@3, MRR), analytic random-chance references, live-mode runner hardening, dedicated tenant isolation, and live dev baseline smoke test.
+> **Pass 2 (planned):** human-review export/import, answer-correctness labels, citation support labels.
+> **Pass 3 (planned):** configuration comparison, optional LLM judge, complete README.
+
+### What is measured
+
+| Metric | Pass | Method |
+|---|---|---|
+| Recall@1, @3, @5 | 1 & 1.5 | Macro average over answerable questions |
+| MRR (Mean Reciprocal Rank) | 1.5 | Macro average of 1.0 / rank of first expected evidence hit (0 if none) |
+| Random-chance reference | 1.5 | Analytic expected value min(1.0, k / N) under uniform random retrieval |
+| Abstention quality | 1 | Correct abstentions, unsupported answers, unnecessary abstentions |
+| Latency | 1 | Per-question end-to-end ms; mean / p50 / p95 |
+| Cost | 1 | Sum from RAGBudget when live credentials are present |
+| Answer correctness | 2 | Human-reviewed labels |
+| Citation support | 2 | Human-reviewed labels (separate from citation validity) |
+
+### Corpus hardening and distractors (Pass 1.5)
+
+The initial corpus had only 13 chunks across 5 documents, meaning top-5 retrieval selected ~38% of the entire corpus by chance alone. In Pass 1.5, `evals/datasets/corpus.py` is expanded to 50 chunks across 18 documents (`corpus_version: "1.5.0"`):
+
+- **Preserved golden evidence:** All original document IDs and chunk indices remain unchanged so existing evidence references in `rag_golden.jsonl` stay strictly valid.
+- **Topically adjacent distractors:** Synthetic policies covering different regional jurisdictions (e.g. EMEA statutory leave), plan tiers (e.g. enterprise software and appliance refunds), role categories (e.g. contractor billing and leave exclusions, executive travel caps), and logistics (freight vs courier) sharing vocabulary with answer documents to require fine-grained retriever discrimination.
+- **Unrelated distractors:** Documents on office facilities, IT hardware allocation, corporate conduct, data classification, and intellectual property to evaluate noise rejection.
+- **Invariant unanswerability:** Distractors were explicitly verified to contain no facts that answer any of the 8 unanswerable questions (q_016–q_020 on dev; q_026, q_027, q_029 on test).
+
+### Dataset schema
+
+Each line in `evals/datasets/rag_golden.jsonl` is a JSON object:
+
+```json
+{
+  "id": "q_001",
+  "split": "dev",
+  "query": "...",
+  "reference_answer": "...",
+  "answerable": true,
+  "expected_evidence": [
+    {"document_id": "synthetic_hr_policy", "chunk_index": 0}
+  ]
+}
+```
+
+- `id`: unique string; validated for duplicates.
+- `split`: `"dev"` or `"test"`. Dev questions for calibration; `test` for headline numbers.
+- `answerable`: when `false`, `reference_answer` must be `null` and `expected_evidence` must be empty.
+- `expected_evidence`: must reference chunks that exist in `evals/datasets/corpus.py`.
+
+### Dev/test split rule
+
+Use `dev` for calibration and baseline smoke runs. Report headline numbers from `test` only. **Never run live evaluations on `test` until configuration is frozen.** The runner enforces this by rejecting live evaluation on the `test` split.
+
+### Running deterministic evaluation (no credentials needed)
+
+```bash
+uv run python -m evals.evaluate_rag \
+    --dataset evals/datasets/rag_golden.jsonl \
+    --mode deterministic \
+    --output evals/results/latest.json
+```
+
+Deterministic mode uses `FakeEmbedder` and `FakeGenerator`. It validates the harness only — numbers do **not** reflect real quality.
+
+### Running live evaluation on dev (requires credentials and database)
+
+```bash
+uv run python -m evals.evaluate_rag \
+    --dataset evals/datasets/rag_golden.jsonl \
+    --mode live \
+    --split dev \
+    --output evals/results/baseline_dev_before_abstention.json
+```
+
+Live mode automatically connects to PostgreSQL, creates/uses a dedicated evaluation tenant (`rag-eval-suite-tenant`), purges any previous evaluation documents for that tenant, ingests the synthetic corpus into pgvector using `GeminiEmbedder`, and evaluates questions with per-question failure isolation.
+
+### Running evaluation pytest tests
+
+```bash
+uv run pytest tests/test_eval_pass1.py tests/test_eval_pass1_5.py -v
+```
+
+### Interpreting metrics and their limitations
+
+- **Recall@1, @3, @5**: fraction of expected chunks retrieved in top-k, macro-averaged over answerable questions.
+- **MRR (Mean Reciprocal Rank)**: macro-average of 1.0 / rank of the first retrieved expected chunk. For multi-evidence questions, the first hit determines the score.
+- **Random-chance reference**: reported next to each recall value as an analytic baseline reference min(1.0, k / N), representing uniform random retrieval without replacement.
+- **Abstention**: the pipeline returns `status="no_context"` when the retriever finds zero passages. No configurable threshold exists. Inspect `unsupported_answer_rate` and `unnecessary_abstention_rate` to assess coverage and safety.
+- **Sample size**: the corpus is synthetic and controlled. Human review is required before drawing real-world conclusions (Pass 2).
+- **Deterministic vs. live**: deterministic results validate the harness only.
+
+### Generated artifacts
+
+Reports in `evals/results/` are git-ignored. The corpus (`evals/datasets/corpus.py`) and golden dataset (`evals/datasets/rag_golden.jsonl`) are committed.
