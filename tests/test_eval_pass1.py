@@ -169,7 +169,9 @@ class TestValidateRecord:
         rec = _make_record(
             answerable=False,
             reference_answer=None,
-            expected_evidence=[{"document_id": "synthetic_hr_policy", "chunk_index": 0}],
+            expected_evidence=[
+                {"document_id": "synthetic_hr_policy", "chunk_index": 0}
+            ],
         )
         errors = validate_record(rec, line_number=1)
         assert any("expected_evidence" in e for e in errors)
@@ -183,7 +185,9 @@ class TestValidateRecord:
 
     def test_invalid_evidence_chunk_index_rejected(self):
         rec = _make_record(
-            expected_evidence=[{"document_id": "synthetic_hr_policy", "chunk_index": 999}]
+            expected_evidence=[
+                {"document_id": "synthetic_hr_policy", "chunk_index": 999}
+            ]
         )
         errors = validate_record(rec, line_number=1)
         assert any("synthetic_hr_policy" in e and "999" in e for e in errors)
@@ -194,9 +198,7 @@ class TestValidateRecord:
         assert any("document_id" in e for e in errors)
 
     def test_evidence_missing_chunk_index_reported(self):
-        rec = _make_record(
-            expected_evidence=[{"document_id": "synthetic_hr_policy"}]
-        )
+        rec = _make_record(expected_evidence=[{"document_id": "synthetic_hr_policy"}])
         errors = validate_record(rec, line_number=1)
         assert any("chunk_index" in e for e in errors)
 
@@ -538,9 +540,7 @@ class TestFakeGenerator:
         from app.rag.generation import ContextPassage
 
         gen = FakeGenerator()
-        passages = [
-            ContextPassage(ref=("doc_a", 0), text="Some evidence text.")
-        ]
+        passages = [ContextPassage(ref=("doc_a", 0), text="Some evidence text.")]
         result = asyncio.run(gen.generate("What is the policy?", passages))
         assert result.status == "answered"
         assert result.answer is not None
@@ -569,7 +569,9 @@ class TestDeterministicEndToEnd:
 
         # No result should have failed.
         failures = [r for r in results if r.failed]
-        assert failures == [], f"Some questions failed: {[r.question_id for r in failures]}"
+        assert failures == [], (
+            f"Some questions failed: {[r.question_id for r in failures]}"
+        )
 
     def test_deterministic_run_produces_valid_report(self, tmp_path: Path):
         from evals.evaluate_rag import run_evaluation
@@ -613,7 +615,9 @@ class TestDeterministicEndToEnd:
         # Deterministic disclaimer is present.
         assert any("DETERMINISTIC" in c for c in loaded["caveats"])
 
-    def test_deterministic_mode_all_answerable_questions_get_recall(self, tmp_path: Path):
+    def test_deterministic_mode_all_answerable_questions_get_recall(
+        self, tmp_path: Path
+    ):
         from evals.evaluate_rag import run_evaluation
         from evals.schema import load_and_validate
 
@@ -681,9 +685,7 @@ class TestPartialFailures:
         # Report written even with failures.
         assert output_path.exists()
 
-        failed_entries = [
-            q for q in report["per_question"] if q["failed"]
-        ]
+        failed_entries = [q for q in report["per_question"] if q["failed"]]
         assert len(failed_entries) == 1
         assert failed_entries[0]["id"] == "q_fail"
         assert failed_entries[0]["error"] == "Pipeline exploded"

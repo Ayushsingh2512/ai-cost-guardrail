@@ -363,7 +363,9 @@ def _extract_retry_delay(exc: Exception) -> float | None:
 
     # Regex search in error message
     msg = f"{exc} {cause}"
-    match = re.search(r"retry(?:\s+after|\s+in)?\s+(\d+(?:\.\d+)?)\s*s?", msg, re.IGNORECASE)
+    match = re.search(
+        r"retry(?:\s+after|\s+in)?\s+(\d+(?:\.\d+)?)\s*s?", msg, re.IGNORECASE
+    )
     if match:
         try:
             delay = float(match.group(1))
@@ -567,7 +569,9 @@ async def _run_one_question_live(
     if retrieval_only:
         while True:
             try:
-                vector = await asyncio.to_thread(service.embedder.embed_query, record["query"])
+                vector = await asyncio.to_thread(
+                    service.embedder.embed_query, record["query"]
+                )
                 if hasattr(actual_retriever, "search_with_scores"):
                     scored = actual_retriever.search_with_scores(
                         tenant_id=tenant_id,
@@ -612,7 +616,11 @@ async def _run_one_question_live(
                     retries += 1
                     backoff = base_backoff * (2 ** (retries - 1))
                     provider_delay = _extract_retry_delay(exc)
-                    delay = provider_delay if (provider_delay is not None and provider_delay > 0) else backoff
+                    delay = (
+                        provider_delay
+                        if (provider_delay is not None and provider_delay > 0)
+                        else backoff
+                    )
                     jitter = random.uniform(0.1, 1.0)
                     sleep_duration = delay + jitter
                     await sleep_fn(sleep_duration)
@@ -751,7 +759,9 @@ async def _run_one_question_live(
     for c in result.generation.citations:
         doc_ref, chunk_idx = c.ref
         canonical_doc_id = uuid_to_doc_id.get(doc_ref, doc_ref)
-        canonical_citations.append({"document_id": canonical_doc_id, "chunk_index": chunk_idx})
+        canonical_citations.append(
+            {"document_id": canonical_doc_id, "chunk_index": chunk_idx}
+        )
 
     cit_validity = evaluate_citation_validity(
         generation_status=result.generation.status,
@@ -795,8 +805,7 @@ def _make_question_result(
 
     if not failed and answerable:
         expected_refs = [
-            (ev["document_id"], ev["chunk_index"])
-            for ev in record["expected_evidence"]
+            (ev["document_id"], ev["chunk_index"]) for ev in record["expected_evidence"]
         ]
         recall_at_1_val = recall_at_1(
             expected_refs=expected_refs,
@@ -942,10 +951,13 @@ async def run_evaluation(
 
         # Streaming checkpoint append
         if checkpoint_path is not None:
-            append_checkpoint_record(checkpoint_path, {
-                "type": "question",
-                **_question_result_to_dict(qr),
-            })
+            append_checkpoint_record(
+                checkpoint_path,
+                {
+                    "type": "question",
+                    **_question_result_to_dict(qr),
+                },
+            )
 
         # 1. Immediate stop on 429 Daily Quota
         if is_daily_quota:
@@ -954,7 +966,7 @@ async def run_evaluation(
                 qid,
                 quota_details,
             )
-            pending_ids = [r["id"] for r in records[i + 1:]]
+            pending_ids = [r["id"] for r in records[i + 1 :]]
             if run_state is not None:
                 run_state["stopped_early"] = True
                 run_state["pending_ids"] = pending_ids
@@ -975,7 +987,7 @@ async def run_evaluation(
                     consecutive_exhaustions,
                     qid,
                 )
-                pending_ids = [r["id"] for r in records[i + 1:]]
+                pending_ids = [r["id"] for r in records[i + 1 :]]
                 if run_state is not None:
                     run_state["stopped_early"] = True
                     run_state["pending_ids"] = pending_ids
@@ -1018,7 +1030,9 @@ def _print_incomplete_warning(failed_or_pending_ids: list[str]) -> None:
     border = "!" * 72
     print(f"\n{border}")
     print("  [CRITICAL WARNING] EVALUATION RUN IS INCOMPLETE")
-    print(f"  {len(failed_or_pending_ids)} question(s) failed or pending: {failed_or_pending_ids}")
+    print(
+        f"  {len(failed_or_pending_ids)} question(s) failed or pending: {failed_or_pending_ids}"
+    )
     print("  DO NOT USE THESE METRICS AS A BASELINE!")
     print(f"{border}\n")
 
@@ -1190,7 +1204,11 @@ async def _main(argv: list[str] | None = None) -> int:
                 if part_clean:
                     target_ids.add(part_clean)
         records = [r for r in records if r["id"] in target_ids]
-        logger.info("Filtered to %d records using --only-ids: %s", len(records), sorted(target_ids))
+        logger.info(
+            "Filtered to %d records using --only-ids: %s",
+            len(records),
+            sorted(target_ids),
+        )
 
     # Order records if requested
     if args.order == "unanswerable-first":
@@ -1259,7 +1277,11 @@ async def _main(argv: list[str] | None = None) -> int:
                         existing_count,
                         embedder.fingerprint,
                     )
-                    docs = db.query(Document).filter(Document.tenant_id == eval_tenant_id).all()
+                    docs = (
+                        db.query(Document)
+                        .filter(Document.tenant_id == eval_tenant_id)
+                        .all()
+                    )
                     uuid_to_doc_id = {str(d.id): (d.source or "") for d in docs}
                     skip_done = True
                 else:
@@ -1283,7 +1305,11 @@ async def _main(argv: list[str] | None = None) -> int:
             logger.error("Live mode setup failed: %s", exc)
             return 1
 
-        generator_name = generator.config.model if not args.retrieval_only else "none (retrieval-only)"
+        generator_name = (
+            generator.config.model
+            if not args.retrieval_only
+            else "none (retrieval-only)"
+        )
         temp = generator.config.temperature if not args.retrieval_only else 0.0
         prompt_ver = PROMPT_VERSION if not args.retrieval_only else "none"
 
@@ -1296,7 +1322,9 @@ async def _main(argv: list[str] | None = None) -> int:
             "temperature": temp,
         }
     else:
-        generator_name = "FakeGenerator" if not args.retrieval_only else "none (retrieval-only)"
+        generator_name = (
+            "FakeGenerator" if not args.retrieval_only else "none (retrieval-only)"
+        )
         temp = 0.0
         prompt_ver = "eval-fake-v1" if not args.retrieval_only else "none"
 
@@ -1319,7 +1347,9 @@ async def _main(argv: list[str] | None = None) -> int:
 
     # 5. Handle --resume and Checkpoint setup
     completed_map: dict[str, QuestionResult] = {}
-    checkpoint_path = args.checkpoint or (args.output.parent / f"{args.output.stem}.checkpoint.jsonl")
+    checkpoint_path = args.checkpoint or (
+        args.output.parent / f"{args.output.stem}.checkpoint.jsonl"
+    )
 
     if args.resume:
         resume_path: Path
@@ -1336,7 +1366,10 @@ async def _main(argv: list[str] | None = None) -> int:
 
         chk_header, chk_questions = read_checkpoint(resume_path)
         if not chk_header or not chk_header.get("config_fingerprint"):
-            logger.error("Cannot resume: resume file %s is missing config fingerprint header", resume_path)
+            logger.error(
+                "Cannot resume: resume file %s is missing config fingerprint header",
+                resume_path,
+            )
             return 1
 
         if chk_header.get("config_fingerprint") != current_config_fingerprint:
@@ -1349,7 +1382,9 @@ async def _main(argv: list[str] | None = None) -> int:
             )
             return 1
 
-        logger.info("Configuration fingerprint verified: %s", current_config_fingerprint)
+        logger.info(
+            "Configuration fingerprint verified: %s", current_config_fingerprint
+        )
         for q_dict in chk_questions:
             if not q_dict.get("failed") and q_dict.get("generation_status") != "failed":
                 qr_obj = QuestionResult(
@@ -1363,7 +1398,9 @@ async def _main(argv: list[str] | None = None) -> int:
                     reciprocal_rank=q_dict.get("reciprocal_rank"),
                     recall_at_k=q_dict.get("recall_at_k"),
                     latency_ms=q_dict.get("latency_ms"),
-                    total_cost=Decimal(q_dict["total_cost"]) if q_dict.get("total_cost") else None,
+                    total_cost=Decimal(q_dict["total_cost"])
+                    if q_dict.get("total_cost")
+                    else None,
                     embedding_tokens=q_dict.get("embedding_tokens"),
                     error=q_dict.get("error"),
                     failed=False,
@@ -1375,22 +1412,29 @@ async def _main(argv: list[str] | None = None) -> int:
                 )
                 completed_map[qr_obj.question_id] = qr_obj
 
-        logger.info("Resuming: %d questions already completed from %s", len(completed_map), resume_path)
+        logger.info(
+            "Resuming: %d questions already completed from %s",
+            len(completed_map),
+            resume_path,
+        )
 
     # Initialize checkpoint file with header if creating fresh file
     if not checkpoint_path.exists() or checkpoint_path.stat().st_size == 0:
-        append_checkpoint_record(checkpoint_path, {
-            "type": "header",
-            "config_fingerprint": current_config_fingerprint,
-            "dataset_sha256": dataset_sha,
-            "corpus_version": CORPUS_VERSION,
-            "prompt_version": prompt_ver,
-            "generator_model": generator_name,
-            "temperature": temp,
-            "top_k": args.top_k,
-            "mode": args.mode,
-            "timestamp": datetime.now(tz=UTC).isoformat(),
-        })
+        append_checkpoint_record(
+            checkpoint_path,
+            {
+                "type": "header",
+                "config_fingerprint": current_config_fingerprint,
+                "dataset_sha256": dataset_sha,
+                "corpus_version": CORPUS_VERSION,
+                "prompt_version": prompt_ver,
+                "generator_model": generator_name,
+                "temperature": temp,
+                "top_k": args.top_k,
+                "mode": args.mode,
+                "timestamp": datetime.now(tz=UTC).isoformat(),
+            },
+        )
 
     # 6. Run evaluation.
     logger.info(
@@ -1427,7 +1471,13 @@ async def _main(argv: list[str] | None = None) -> int:
     complete = (len(failed_question_ids) == 0) and (len(pending_ids) == 0)
 
     # 7. Aggregate metrics.
-    eval_splits = sorted({r["split"] for r in records if any(qr.question_id == r["id"] for qr in question_results)})
+    eval_splits = sorted(
+        {
+            r["split"]
+            for r in records
+            if any(qr.question_id == r["id"] for qr in question_results)
+        }
+    )
     split_metrics: dict[str, SplitMetrics] = {}
     for split in eval_splits:
         split_metrics[split] = compute_split_metrics(
@@ -1438,7 +1488,11 @@ async def _main(argv: list[str] | None = None) -> int:
         )
 
     # 8. Print summary.
-    _print_summary(split_metrics, mode=args.mode, failed_question_ids=failed_question_ids + pending_ids)
+    _print_summary(
+        split_metrics,
+        mode=args.mode,
+        failed_question_ids=failed_question_ids + pending_ids,
+    )
 
     # 9. Write report.
     write_report(
@@ -1491,9 +1545,15 @@ def _print_summary(
             ref_str = f"{ref:.4f}" if ref is not None else "N/A"
             return f"{val:.4f}  (random-chance reference: {ref_str})"
 
-        print(f"    Recall@1 (macro)  : {_fmt(m.recall_at_1_mean, m.random_chance_recall_at_1)}")
-        print(f"    Recall@3 (macro)  : {_fmt(m.recall_at_3_mean, m.random_chance_recall_at_3)}")
-        print(f"    Recall@5 (macro)  : {_fmt(m.recall_at_5_mean, m.random_chance_recall_at_5)}")
+        print(
+            f"    Recall@1 (macro)  : {_fmt(m.recall_at_1_mean, m.random_chance_recall_at_1)}"
+        )
+        print(
+            f"    Recall@3 (macro)  : {_fmt(m.recall_at_3_mean, m.random_chance_recall_at_3)}"
+        )
+        print(
+            f"    Recall@5 (macro)  : {_fmt(m.recall_at_5_mean, m.random_chance_recall_at_5)}"
+        )
         if m.mrr_mean is not None:
             print(f"    MRR (macro)       : {m.mrr_mean:.4f}")
         else:
@@ -1512,9 +1572,11 @@ def _print_summary(
             f"{m.unnecessary_abstentions}/{m.answerable_count}"
         )
         if m.latency_ms_mean is not None:
-            print(f"    Latency mean/p50/p95 (ms): "
-                  f"{m.latency_ms_mean:.0f} / {m.latency_ms_p50:.0f} / "
-                  f"{m.latency_ms_p95:.0f}")
+            print(
+                f"    Latency mean/p50/p95 (ms): "
+                f"{m.latency_ms_mean:.0f} / {m.latency_ms_p50:.0f} / "
+                f"{m.latency_ms_p95:.0f}"
+            )
     print()
     if mode == "deterministic":
         print(

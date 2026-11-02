@@ -165,7 +165,6 @@ SYNTHETIC_CORPUS: dict[str, list[str]] = {
             "Alcohol is not a reimbursable expense under any category."
         ),
     ],
-
     # =======================================================================
     # Expanded Distractors (Pass 1.5) — Hard / Topically Adjacent
     # =======================================================================
@@ -323,7 +322,6 @@ SYNTHETIC_CORPUS: dict[str, list[str]] = {
             "for executive client engagements."
         ),
     ],
-
     # =======================================================================
     # Expanded Distractors (Pass 1.5) — Unrelated Corporate Policies
     # =======================================================================

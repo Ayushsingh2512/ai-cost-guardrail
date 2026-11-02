@@ -49,7 +49,11 @@ def sanitize_secrets(text: str | None) -> str | None:
     # 2. Match common Google/Gemini API key patterns
     sanitized = re.sub(r"AIza[0-9A-Za-z-_]{20,}", "[REDACTED_API_KEY]", sanitized)
     # 3. Match generic key/token patterns in URLs or headers
-    sanitized = re.sub(r"(?i)(key|token|auth|bearer)\s*[:=]\s*['\"]?[^\s&'\"]+", r"\1=[REDACTED]", sanitized)
+    sanitized = re.sub(
+        r"(?i)(key|token|auth|bearer)\s*[:=]\s*['\"]?[^\s&'\"]+",
+        r"\1=[REDACTED]",
+        sanitized,
+    )
     return sanitized
 
 
@@ -148,8 +152,12 @@ def read_checkpoint(path: Path) -> tuple[dict[str, Any] | None, list[dict[str, A
                     questions.append(record)
     except Exception as exc:
         import logging
-        logging.getLogger(__name__).warning("Failed to parse checkpoint %s: %s", path, exc)
+
+        logging.getLogger(__name__).warning(
+            "Failed to parse checkpoint %s: %s", path, exc
+        )
     return header, questions
+
 
 DETERMINISTIC_DISCLAIMER = (
     "DETERMINISTIC MODE: retrieval uses FakeEmbedder + FakeCorpusRetriever "
@@ -213,9 +221,7 @@ def _split_metrics_to_dict(m: SplitMetrics) -> dict[str, Any]:
             "metric": "Recall@1",
             "aggregation": "macro average over answerable questions",
             "mean": (
-                round(m.recall_at_1_mean, 4)
-                if m.recall_at_1_mean is not None
-                else None
+                round(m.recall_at_1_mean, 4) if m.recall_at_1_mean is not None else None
             ),
             "random_chance_reference": (
                 round(m.random_chance_recall_at_1, 4)
@@ -228,9 +234,7 @@ def _split_metrics_to_dict(m: SplitMetrics) -> dict[str, Any]:
             "metric": "Recall@3",
             "aggregation": "macro average over answerable questions",
             "mean": (
-                round(m.recall_at_3_mean, 4)
-                if m.recall_at_3_mean is not None
-                else None
+                round(m.recall_at_3_mean, 4) if m.recall_at_3_mean is not None else None
             ),
             "random_chance_reference": (
                 round(m.random_chance_recall_at_3, 4)
@@ -243,9 +247,7 @@ def _split_metrics_to_dict(m: SplitMetrics) -> dict[str, Any]:
             "metric": "Recall@5",
             "aggregation": "macro average over answerable questions",
             "mean": (
-                round(m.recall_at_5_mean, 4)
-                if m.recall_at_5_mean is not None
-                else None
+                round(m.recall_at_5_mean, 4) if m.recall_at_5_mean is not None else None
             ),
             "random_chance_reference": (
                 round(m.random_chance_recall_at_5, 4)
@@ -273,9 +275,7 @@ def _split_metrics_to_dict(m: SplitMetrics) -> dict[str, Any]:
         "metric": "Recall@5",
         "aggregation": "macro average over answerable questions",
         "mean": (
-            round(m.recall_at_5_mean, 4)
-            if m.recall_at_5_mean is not None
-            else None
+            round(m.recall_at_5_mean, 4) if m.recall_at_5_mean is not None else None
         ),
         "values": [round(v, 4) for v in m.recall_at_5_values],
         "answerable_questions_evaluated": len(m.recall_at_5_values),
@@ -286,18 +286,16 @@ def _split_metrics_to_dict(m: SplitMetrics) -> dict[str, Any]:
         "mean": (
             round(m.latency_ms_mean, 1) if m.latency_ms_mean is not None else None
         ),
-        "p50": (
-            round(m.latency_ms_p50, 1) if m.latency_ms_p50 is not None else None
-        ),
-        "p95": (
-            round(m.latency_ms_p95, 1) if m.latency_ms_p95 is not None else None
-        ),
+        "p50": (round(m.latency_ms_p50, 1) if m.latency_ms_p50 is not None else None),
+        "p95": (round(m.latency_ms_p95, 1) if m.latency_ms_p95 is not None else None),
         "sample_count": len(m.latency_ms_values),
     }
 
     cost: dict[str, Any] = {
         "total_cost_usd": str(m.total_cost_sum) if m.cost_available else "unavailable",
-        "embedding_tokens_total": m.embedding_tokens_sum if m.cost_available else "unavailable",
+        "embedding_tokens_total": m.embedding_tokens_sum
+        if m.cost_available
+        else "unavailable",
         "note": (
             "Cost is only reported when the pipeline is run with a RAGBudget "
             "(live mode with valid credentials). In deterministic mode all cost "
@@ -379,7 +377,7 @@ def write_report(
     """
     timestamp = datetime.now(tz=UTC).isoformat()
     failed_question_ids = [qr.question_id for qr in question_results if qr.failed]
-    
+
     if complete is None:
         has_pending = pending_question_ids is not None and len(pending_question_ids) > 0
         complete = len(failed_question_ids) == 0 and not has_pending
@@ -389,9 +387,7 @@ def write_report(
     effective_dataset_sha256 = dataset_sha256 or compute_file_sha256(dataset_path)
     effective_corpus_version = corpus_version or CORPUS_VERSION
     effective_prompt_version = (
-        prompt_version
-        or model_config.get("prompt_version")
-        or DEFAULT_PROMPT_VERSION
+        prompt_version or model_config.get("prompt_version") or DEFAULT_PROMPT_VERSION
     )
     effective_generator_model = (
         generator_model

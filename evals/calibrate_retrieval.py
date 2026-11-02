@@ -199,10 +199,16 @@ def print_calibration_summary(result: dict[str, Any]) -> None:
     if sep["margin"] is not None:
         margin_str = f"{sep['margin']:+.4f}"
         print(f"    Separation margin (min(ans) - max(unans)) : {margin_str}")
-        print(f"    Mean difference (mean(ans) - mean(unans)): {sep['mean_difference']:+.4f}")
-        print(f"    Distributions separable without overlap  : {'YES' if sep['separable'] else 'NO'}")
+        print(
+            f"    Mean difference (mean(ans) - mean(unans)): {sep['mean_difference']:+.4f}"
+        )
+        print(
+            f"    Distributions separable without overlap  : {'YES' if sep['separable'] else 'NO'}"
+        )
         if sep["suggested_threshold"] is not None:
-            print(f"    Suggested abstention score threshold    : {sep['suggested_threshold']:.4f}")
+            print(
+                f"    Suggested abstention score threshold    : {sep['suggested_threshold']:.4f}"
+            )
     else:
         print("    Insufficient data for separation calculation.")
 
@@ -241,4 +247,3 @@ def main(argv: list[str] | None = None) -> int:
 
 if __name__ == "__main__":
     sys.exit(main())
-

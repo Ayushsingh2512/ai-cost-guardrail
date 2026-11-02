@@ -55,7 +55,9 @@ from evals.datasets.corpus import VALID_EVIDENCE_REFS
 # Data types
 # ---------------------------------------------------------------------------
 
-GenerationStatus = Literal["answered", "no_context", "blocked", "failed", "retrieval_only"]
+GenerationStatus = Literal[
+    "answered", "no_context", "blocked", "failed", "retrieval_only"
+]
 
 
 @dataclass(frozen=True)
@@ -162,9 +164,9 @@ class SplitMetrics:
     random_chance_recall_at_5: float | None = None
 
     # --- Abstention ---
-    correct_abstentions: int = 0          # unanswerable → no_context
-    unsupported_answers: int = 0          # unanswerable → answered
-    unnecessary_abstentions: int = 0      # answerable   → no_context
+    correct_abstentions: int = 0  # unanswerable → no_context
+    unsupported_answers: int = 0  # unanswerable → answered
+    unnecessary_abstentions: int = 0  # answerable   → no_context
 
     # --- Latency ---
     latency_ms_values: list[int] = field(default_factory=list)

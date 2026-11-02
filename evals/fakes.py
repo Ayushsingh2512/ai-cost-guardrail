@@ -187,7 +187,7 @@ class FakeGenerator:
         query: str,
         passages: Sequence[ContextPassage],
     ) -> str:
-        parts = [f"[{i+1}]\n{p.text.strip()}" for i, p in enumerate(passages)]
+        parts = [f"[{i + 1}]\n{p.text.strip()}" for i, p in enumerate(passages)]
         evidence = "\n\n".join(parts)
         return f"EVIDENCE\n=======\n{evidence}\n\nQUESTION\n========\n{query.strip()}"
 

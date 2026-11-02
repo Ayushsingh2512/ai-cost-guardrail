@@ -82,18 +82,14 @@ def validate_record(record: GoldenRecord, line_number: int) -> list[str]:
 
     if answerable:
         if ref_answer is None:
-            errors.append(
-                f"{prefix}: answerable=true but reference_answer is null"
-            )
+            errors.append(f"{prefix}: answerable=true but reference_answer is null")
         elif not isinstance(ref_answer, str):
             errors.append(
                 f"{prefix}: reference_answer must be a string, "
                 f"got {type(ref_answer).__name__}"
             )
         if not expected_evidence:
-            errors.append(
-                f"{prefix}: answerable=true but expected_evidence is empty"
-            )
+            errors.append(f"{prefix}: answerable=true but expected_evidence is empty")
     else:
         # Unanswerable: reference_answer must be absent or null,
         # expected_evidence must be empty.

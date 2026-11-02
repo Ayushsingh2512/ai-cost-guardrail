@@ -60,8 +60,12 @@ class TestRetrievalOnly:
     async def test_deterministic_retrieval_only_skips_generation(self):
         retriever = FakeCorpusRetriever(
             passages={
-                ("doc_a", 0): ContextPassage(ref=("doc_a", 0), text="Alpha chunk text", source="doc_a", page=0),
-                ("doc_b", 1): ContextPassage(ref=("doc_b", 1), text="Beta chunk text", source="doc_b", page=1),
+                ("doc_a", 0): ContextPassage(
+                    ref=("doc_a", 0), text="Alpha chunk text", source="doc_a", page=0
+                ),
+                ("doc_b", 1): ContextPassage(
+                    ref=("doc_b", 1), text="Beta chunk text", source="doc_b", page=1
+                ),
             }
         )
         generator = FakeGenerator()
@@ -216,7 +220,9 @@ class TestPerQuestionAndSecrets:
             retries=1,
             answer="According to [1], vacation is 15 days.",
             citations=[{"document_id": "doc_hr", "chunk_index": 0}],
-            retrieved_chunks=[{"document_id": "doc_hr", "chunk_index": 0, "score": 0.92}],
+            retrieved_chunks=[
+                {"document_id": "doc_hr", "chunk_index": 0, "score": 0.92}
+            ],
             citation_validity={"valid": True, "reason": "All citations valid"},
         )
 
@@ -235,7 +241,9 @@ class TestPerQuestionAndSecrets:
         assert pq["id"] == "q_100"
         assert pq["answer"] == "According to [1], vacation is 15 days."
         assert pq["citations"] == [{"document_id": "doc_hr", "chunk_index": 0}]
-        assert pq["retrieved"] == [{"document_id": "doc_hr", "chunk_index": 0, "score": 0.92}]
+        assert pq["retrieved"] == [
+            {"document_id": "doc_hr", "chunk_index": 0, "score": 0.92}
+        ]
         assert pq["citation_validity"]["valid"] is True
         assert pq["retries"] == 1
 
@@ -284,10 +292,15 @@ class TestResumeAndCliFiltering:
     def test_resume_refuses_on_config_fingerprint_mismatch(self, tmp_path):
         chk_path = tmp_path / "test.checkpoint.jsonl"
         with chk_path.open("w", encoding="utf-8") as f:
-            f.write(json.dumps({
-                "type": "header",
-                "config_fingerprint": "different_hash_value_12345",
-            }) + "\n")
+            f.write(
+                json.dumps(
+                    {
+                        "type": "header",
+                        "config_fingerprint": "different_hash_value_12345",
+                    }
+                )
+                + "\n"
+            )
 
         header, _ = read_checkpoint(chk_path)
         assert header is not None
@@ -307,8 +320,20 @@ class TestResumeAndCliFiltering:
     @pytest.mark.asyncio
     async def test_resume_skips_completed_questions(self):
         records: list[GoldenRecord] = [
-            {"id": "q_done", "split": "dev", "query": "Q1", "answerable": True, "expected_evidence": [{"document_id": "doc_a", "chunk_index": 0}]},
-            {"id": "q_new", "split": "dev", "query": "Q2", "answerable": False, "expected_evidence": []},
+            {
+                "id": "q_done",
+                "split": "dev",
+                "query": "Q1",
+                "answerable": True,
+                "expected_evidence": [{"document_id": "doc_a", "chunk_index": 0}],
+            },
+            {
+                "id": "q_new",
+                "split": "dev",
+                "query": "Q2",
+                "answerable": False,
+                "expected_evidence": [],
+            },
         ]
 
         completed_qr = QuestionResult(
@@ -337,13 +362,18 @@ class TestResumeAndCliFiltering:
 
     def test_cli_parsing_options(self):
         parser = _build_arg_parser()
-        args = parser.parse_args([
-            "--retrieval-only",
-            "--resume",
-            "--only-ids", "q_001", "q_002",
-            "--order", "unanswerable-first",
-            "--skip-ingest",
-        ])
+        args = parser.parse_args(
+            [
+                "--retrieval-only",
+                "--resume",
+                "--only-ids",
+                "q_001",
+                "q_002",
+                "--order",
+                "unanswerable-first",
+                "--skip-ingest",
+            ]
+        )
         assert args.retrieval_only is True
         assert args.resume is True
         assert args.only_ids == ["q_001", "q_002"]
@@ -358,7 +388,9 @@ class TestResumeAndCliFiltering:
 
 class TestImmediateStopConditions:
     def test_daily_quota_error_detection(self):
-        e1 = Exception("429 Resource has been exhausted: quota limit 'GenerateContent requests per day' exceeded")
+        e1 = Exception(
+            "429 Resource has been exhausted: quota limit 'GenerateContent requests per day' exceeded"
+        )
         is_daily, details = _is_daily_quota_error(e1)
         assert is_daily is True
         assert "per day" in (details or "").lower()
@@ -371,13 +403,33 @@ class TestImmediateStopConditions:
     async def test_stops_immediately_on_429_daily_quota(self):
         mock_service = MagicMock()
         mock_service.answer = AsyncMock(
-            side_effect=Exception("429 Resource exhausted: free_tier_requests_per_day exceeded")
+            side_effect=Exception(
+                "429 Resource exhausted: free_tier_requests_per_day exceeded"
+            )
         )
 
         records: list[GoldenRecord] = [
-            {"id": "q_quota", "split": "dev", "query": "Q1", "answerable": True, "expected_evidence": [{"document_id": "doc_1", "chunk_index": 0}]},
-            {"id": "q_pending_1", "split": "dev", "query": "Q2", "answerable": False, "expected_evidence": []},
-            {"id": "q_pending_2", "split": "dev", "query": "Q3", "answerable": False, "expected_evidence": []},
+            {
+                "id": "q_quota",
+                "split": "dev",
+                "query": "Q1",
+                "answerable": True,
+                "expected_evidence": [{"document_id": "doc_1", "chunk_index": 0}],
+            },
+            {
+                "id": "q_pending_1",
+                "split": "dev",
+                "query": "Q2",
+                "answerable": False,
+                "expected_evidence": [],
+            },
+            {
+                "id": "q_pending_2",
+                "split": "dev",
+                "query": "Q3",
+                "answerable": False,
+                "expected_evidence": [],
+            },
         ]
 
         run_state: dict[str, Any] = {}
@@ -414,9 +466,27 @@ class TestImmediateStopConditions:
         mock_service.answer = fail_rate_limit
 
         records: list[GoldenRecord] = [
-            {"id": "q_fail_1", "split": "dev", "query": "Q1", "answerable": True, "expected_evidence": [{"document_id": "doc_1", "chunk_index": 0}]},
-            {"id": "q_fail_2", "split": "dev", "query": "Q2", "answerable": True, "expected_evidence": [{"document_id": "doc_1", "chunk_index": 0}]},
-            {"id": "q_pending", "split": "dev", "query": "Q3", "answerable": False, "expected_evidence": []},
+            {
+                "id": "q_fail_1",
+                "split": "dev",
+                "query": "Q1",
+                "answerable": True,
+                "expected_evidence": [{"document_id": "doc_1", "chunk_index": 0}],
+            },
+            {
+                "id": "q_fail_2",
+                "split": "dev",
+                "query": "Q2",
+                "answerable": True,
+                "expected_evidence": [{"document_id": "doc_1", "chunk_index": 0}],
+            },
+            {
+                "id": "q_pending",
+                "split": "dev",
+                "query": "Q3",
+                "answerable": False,
+                "expected_evidence": [],
+            },
         ]
 
         run_state: dict[str, Any] = {}
@@ -466,25 +536,33 @@ class TestCalibrationTool:
                     "id": "q_ans_1",
                     "split": "dev",
                     "answerable": True,
-                    "retrieved": [{"document_id": "doc_1", "chunk_index": 0, "score": 0.88}],
+                    "retrieved": [
+                        {"document_id": "doc_1", "chunk_index": 0, "score": 0.88}
+                    ],
                 },
                 {
                     "id": "q_ans_2",
                     "split": "dev",
                     "answerable": True,
-                    "retrieved": [{"document_id": "doc_1", "chunk_index": 1, "score": 0.92}],
+                    "retrieved": [
+                        {"document_id": "doc_1", "chunk_index": 1, "score": 0.92}
+                    ],
                 },
                 {
                     "id": "q_unans_1",
                     "split": "dev",
                     "answerable": False,
-                    "retrieved": [{"document_id": "doc_2", "chunk_index": 0, "score": 0.55}],
+                    "retrieved": [
+                        {"document_id": "doc_2", "chunk_index": 0, "score": 0.55}
+                    ],
                 },
                 {
                     "id": "q_unans_2",
                     "split": "dev",
                     "answerable": False,
-                    "retrieved": [{"document_id": "doc_2", "chunk_index": 1, "score": 0.60}],
+                    "retrieved": [
+                        {"document_id": "doc_2", "chunk_index": 1, "score": 0.60}
+                    ],
                 },
             ]
         }
@@ -496,7 +574,9 @@ class TestCalibrationTool:
         # Separation margin: 0.88 - 0.60 = 0.28
         assert calib["separation"]["margin"] == pytest.approx(0.28, abs=1e-4)
         assert calib["separation"]["separable"] is True
-        assert calib["separation"]["suggested_threshold"] == pytest.approx(0.74, abs=1e-4)
+        assert calib["separation"]["suggested_threshold"] == pytest.approx(
+            0.74, abs=1e-4
+        )
 
     def test_calibration_refuses_test_split(self):
         report_data = {
@@ -505,11 +585,12 @@ class TestCalibrationTool:
                     "id": "q_test_1",
                     "split": "test",
                     "answerable": True,
-                    "retrieved": [{"document_id": "doc_1", "chunk_index": 0, "score": 0.90}],
+                    "retrieved": [
+                        {"document_id": "doc_1", "chunk_index": 0, "score": 0.90}
+                    ],
                 }
             ]
         }
 
         with pytest.raises(ValueError, match="dev.*split only"):
             analyze_retrieval_calibration(report_data)
-

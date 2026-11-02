@@ -85,7 +85,13 @@ class TestRankingMetrics:
 
     def test_recall_at_5_hit_at_rank_5(self):
         expected = [("doc_a", 0)]
-        retrieved = [("doc_1", 0), ("doc_2", 0), ("doc_3", 0), ("doc_4", 0), ("doc_a", 0)]
+        retrieved = [
+            ("doc_1", 0),
+            ("doc_2", 0),
+            ("doc_3", 0),
+            ("doc_4", 0),
+            ("doc_a", 0),
+        ]
         assert recall_at_k(expected, retrieved, k=5) == pytest.approx(1.0)
 
     def test_multi_evidence_recall_progression(self):
@@ -156,12 +162,16 @@ class TestRandomChanceRecall:
     def test_with_expected_evidence_counts_invariance(self):
         # Mathematical property: macro-expectation is identical regardless of evidence counts
         counts = [1, 2, 1, 3, 2]
-        res = random_chance_recall_at_k(corpus_size=50, k=5, expected_evidence_counts=counts)
+        res = random_chance_recall_at_k(
+            corpus_size=50, k=5, expected_evidence_counts=counts
+        )
         assert res == pytest.approx(0.10)
 
     def test_invalid_evidence_count_raises(self):
         with pytest.raises(ValueError, match="positive integers"):
-            random_chance_recall_at_k(corpus_size=50, k=5, expected_evidence_counts=[0, 1])
+            random_chance_recall_at_k(
+                corpus_size=50, k=5, expected_evidence_counts=[0, 1]
+            )
 
 
 class TestSplitMetricsRankingAggregation:
@@ -294,7 +304,12 @@ class TestCorpusHardening:
 
         # q_027: third-party contractors covered by security policy
         distractor_security = " ".join(
-            [text.lower() for doc, chunks in SYNTHETIC_CORPUS.items() if "security" in doc and doc not in original_doc_ids for text in chunks]
+            [
+                text.lower()
+                for doc, chunks in SYNTHETIC_CORPUS.items()
+                if "security" in doc and doc not in original_doc_ids
+                for text in chunks
+            ]
         )
         assert "contractor" not in distractor_security
         assert "third-party" not in distractor_security
@@ -386,7 +401,9 @@ class TestLiveModeHardening:
             "split": "dev",
             "query": "What is the policy?",
             "answerable": True,
-            "expected_evidence": [{"document_id": "synthetic_hr_policy", "chunk_index": 0}],
+            "expected_evidence": [
+                {"document_id": "synthetic_hr_policy", "chunk_index": 0}
+            ],
         }
 
         retrieval, error = asyncio.run(
@@ -419,7 +436,9 @@ class TestLiveModeHardening:
             "split": "dev",
             "query": "What is the policy?",
             "answerable": True,
-            "expected_evidence": [{"document_id": "synthetic_hr_policy", "chunk_index": 0}],
+            "expected_evidence": [
+                {"document_id": "synthetic_hr_policy", "chunk_index": 0}
+            ],
         }
 
         retrieval, error = asyncio.run(
@@ -447,9 +466,33 @@ class TestLivePacingAndRetries:
             sleep_calls.append(duration)
 
         records = [
-            {"id": "q1", "split": "dev", "query": "Q1", "answerable": True, "expected_evidence": [{"document_id": "synthetic_hr_policy", "chunk_index": 0}]},
-            {"id": "q2", "split": "dev", "query": "Q2", "answerable": True, "expected_evidence": [{"document_id": "synthetic_hr_policy", "chunk_index": 0}]},
-            {"id": "q3", "split": "dev", "query": "Q3", "answerable": True, "expected_evidence": [{"document_id": "synthetic_hr_policy", "chunk_index": 0}]},
+            {
+                "id": "q1",
+                "split": "dev",
+                "query": "Q1",
+                "answerable": True,
+                "expected_evidence": [
+                    {"document_id": "synthetic_hr_policy", "chunk_index": 0}
+                ],
+            },
+            {
+                "id": "q2",
+                "split": "dev",
+                "query": "Q2",
+                "answerable": True,
+                "expected_evidence": [
+                    {"document_id": "synthetic_hr_policy", "chunk_index": 0}
+                ],
+            },
+            {
+                "id": "q3",
+                "split": "dev",
+                "query": "Q3",
+                "answerable": True,
+                "expected_evidence": [
+                    {"document_id": "synthetic_hr_policy", "chunk_index": 0}
+                ],
+            },
         ]
 
         asyncio.run(
@@ -505,7 +548,9 @@ class TestLivePacingAndRetries:
             "split": "dev",
             "query": "Q?",
             "answerable": True,
-            "expected_evidence": [{"document_id": "synthetic_hr_policy", "chunk_index": 0}],
+            "expected_evidence": [
+                {"document_id": "synthetic_hr_policy", "chunk_index": 0}
+            ],
         }
 
         retrieval, error = asyncio.run(
@@ -551,7 +596,9 @@ class TestLivePacingAndRetries:
             "split": "dev",
             "query": "Q?",
             "answerable": True,
-            "expected_evidence": [{"document_id": "synthetic_hr_policy", "chunk_index": 0}],
+            "expected_evidence": [
+                {"document_id": "synthetic_hr_policy", "chunk_index": 0}
+            ],
         }
 
         retrieval, error = asyncio.run(
@@ -612,7 +659,9 @@ class TestLivePacingAndRetries:
         )
 
         split_metrics = {
-            "dev": compute_split_metrics([q_ok, q_fail], split="dev", top_k=5, corpus_size=50)
+            "dev": compute_split_metrics(
+                [q_ok, q_fail], split="dev", top_k=5, corpus_size=50
+            )
         }
 
         report = write_report(
@@ -620,7 +669,10 @@ class TestLivePacingAndRetries:
             dataset_path=Path("evals/datasets/rag_golden.jsonl"),
             dataset_size=2,
             mode="live",
-            model_config={"embedder": "gemini-embedding-001", "generator": "gemini-3-flash-preview"},
+            model_config={
+                "embedder": "gemini-embedding-001",
+                "generator": "gemini-3-flash-preview",
+            },
             top_k=5,
             question_results=[q_ok, q_fail],
             split_metrics=split_metrics,
@@ -659,7 +711,10 @@ class TestLivePacingAndRetries:
             dataset_path=Path("evals/datasets/rag_golden.jsonl"),
             dataset_size=1,
             mode="live",
-            model_config={"embedder": "gemini-embedding-001", "generator": "gemini-3-flash-preview"},
+            model_config={
+                "embedder": "gemini-embedding-001",
+                "generator": "gemini-3-flash-preview",
+            },
             top_k=5,
             question_results=[q_ok],
             split_metrics=split_metrics,
